@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from uuid import uuid4
 
 from operation_lens_v2.config import settings
@@ -26,6 +27,8 @@ INVENTORY_RESULT_LIMIT = 40
 INVENTORY_DISPLAY_LIMIT = 20
 INVENTORY_CITATION_LIMIT = 3
 TOP_RESULTS_LIMIT = 10
+DOCUMENT_CHUNK_LIMIT = 12
+RELATIONSHIP_INVENTORY_ASSOCIATION_LIMIT = 2
 INVENTORY_CONFIDENCE_POSTURE = (
     "direct inventory results backed by exact alias mentions and chunk citations."
 )
@@ -36,24 +39,65 @@ INVENTORY_EVIDENCE_GAP = (
 CHAT_HISTORY_TURN_LIMIT = 6
 CHAT_HISTORY_LINE_LIMIT = 18
 VALID_RECALL_MODES = {"fast", "balanced", "exhaustive", "auto"}
+RELATIONSHIP_TEXT = {
+    "ASSOCIATED_WITH": "is associated with",
+    "OBSERVED_AT": "was observed at",
+    "LINKED_TO": "is linked to",
+    "MENTIONED_WITH": "was mentioned with",
+    "INFERRED_LINK": "is inferentially linked to",
+}
+FOLLOW_UP_CONTEXT_RE = re.compile(
+    r"\b("
+    r"he|she|they|them|their|there|that|those|it|him|her|his|hers|same|again|too"
+    r")\b"
+)
 
 
 def _inventory_name_filter_sql(entity_type: str) -> tuple[str, list[str]]:
-    if entity_type != "LOCATION":
-        return "", []
-    return (
-        """
-          AND length(trim(e.canonical_name)) >= 4
-          AND lower(trim(e.canonical_name)) NOT LIKE 'to %'
-          AND lower(trim(e.canonical_name)) NOT LIKE 'from %'
-          AND lower(trim(e.canonical_name)) NOT LIKE 'than %'
-          AND lower(trim(e.canonical_name)) NOT LIKE 'near %'
-          AND lower(trim(e.canonical_name)) NOT LIKE 'at %'
-          AND lower(trim(e.canonical_name)) NOT LIKE 'in %'
-          AND lower(trim(e.canonical_name)) NOT LIKE 'on %'
-        """,
-        [],
-    )
+    if entity_type == "LOCATION":
+        return (
+            """
+              AND length(trim(e.canonical_name)) >= 4
+              AND lower(trim(e.canonical_name)) NOT LIKE 'to %'
+              AND lower(trim(e.canonical_name)) NOT LIKE 'from %'
+              AND lower(trim(e.canonical_name)) NOT LIKE 'than %'
+              AND lower(trim(e.canonical_name)) NOT LIKE 'near %'
+              AND lower(trim(e.canonical_name)) NOT LIKE 'at %'
+              AND lower(trim(e.canonical_name)) NOT LIKE 'in %'
+              AND lower(trim(e.canonical_name)) NOT LIKE 'on %'
+            """,
+            [],
+        )
+    if entity_type == "PHONE":
+        return (
+            """
+              AND regexp_full_match(
+                regexp_replace(trim(e.canonical_name), '[^0-9]', '', 'g'),
+                '^[0-9]{10,15}$'
+              )
+              AND lower(trim(e.canonical_name)) NOT LIKE 'number ending %'
+              AND EXISTS (
+                SELECT 1
+                FROM entity_aliases ea_phone
+                LEFT JOIN chunks c_phone ON c_phone.chunk_id = ea_phone.source_chunk
+                WHERE ea_phone.entity_id = e.entity_id
+                  AND (
+                    lower(coalesce(c_phone.text, '')) LIKE '%phone%'
+                    OR lower(coalesce(c_phone.text, '')) LIKE '%contact number%'
+                    OR lower(coalesce(c_phone.text, '')) LIKE '%msisdn%'
+                    OR lower(coalesce(c_phone.text, '')) LIKE '%call data%'
+                    OR lower(coalesce(c_phone.text, '')) LIKE '%telephony%'
+                    OR lower(coalesce(c_phone.text, '')) LIKE '%handset%'
+                    OR lower(coalesce(c_phone.text, '')) LIKE '%contacted%'
+                    OR lower(coalesce(c_phone.text, '')) LIKE '%calls%'
+                    OR lower(coalesce(c_phone.text, '')) LIKE '%tower%'
+                    OR lower(coalesce(c_phone.text, '')) LIKE '%cell site%'
+                  )
+              )
+            """,
+            [],
+        )
+    return "", []
 
 
 def _inventory_rows(con, *, entity_type: str, case_id: str | None) -> list[tuple]:
@@ -108,8 +152,8 @@ def _inventory_citations(con, *, entity_id: str) -> list[dict[str, object]]:
             c.text,
             ea.source_chunk,
             row_number() OVER (
-              PARTITION BY d.doc_id, c.page, ea.source_chunk
-              ORDER BY ea.alias_id
+              PARTITION BY coalesce(d.filename, d.doc_id), c.page
+              ORDER BY length(coalesce(c.text, '')) DESC, ea.alias_id
             ) AS rn
           FROM entity_aliases ea
           JOIN documents d ON d.doc_id = ea.source_doc
@@ -133,6 +177,94 @@ def _inventory_citations(con, *, entity_id: str) -> list[dict[str, object]]:
         }
         for row in rows
     ]
+
+
+def _resolve_document_scope(
+    con,
+    *,
+    document_refs: list[str],
+    case_id: str | None,
+) -> list[dict[str, str]]:
+    normalized_refs = list(
+        dict.fromkeys(ref.strip().lower() for ref in document_refs if isinstance(ref, str) and ref.strip())
+    )
+    if not normalized_refs:
+        return []
+
+    placeholders = ",".join(["?"] * len(normalized_refs))
+    params: list[object] = [*normalized_refs]
+    case_filter = ""
+    if case_id:
+        case_filter = "AND case_id = ?"
+        params.append(case_id)
+
+    rows = con.execute(
+        f"""
+        SELECT doc_id, filename
+        FROM documents
+        WHERE lower(filename) IN ({placeholders})
+        {case_filter}
+        ORDER BY filename
+        """,
+        params,
+    ).fetchall()
+    return [{"doc_id": row[0], "filename": row[1]} for row in rows]
+
+
+def _document_chunk_rows(con, *, doc_ids: set[str], limit: int = DOCUMENT_CHUNK_LIMIT) -> list[dict[str, object]]:
+    if not doc_ids:
+        return []
+    placeholders = ",".join(["?"] * len(doc_ids))
+    rows = con.execute(
+        f"""
+        SELECT c.chunk_id, c.doc_id, d.filename, c.page, c.text
+        FROM chunks c
+        JOIN documents d ON d.doc_id = c.doc_id
+        WHERE c.doc_id IN ({placeholders})
+        ORDER BY c.page, c.chunk_index
+        LIMIT ?
+        """,
+        [*doc_ids, limit],
+    ).fetchall()
+    return [
+        {
+            "source": "document",
+            "chunk_id": row[0],
+            "doc_id": row[1],
+            "doc_name": row[2],
+            "page": row[3],
+            "text": row[4] or "",
+            "score": 0.95,
+        }
+        for row in rows
+    ]
+
+
+def _filter_rows_to_documents(
+    rows: list[dict[str, object]],
+    *,
+    doc_ids: set[str],
+) -> list[dict[str, object]]:
+    if not doc_ids:
+        return rows
+    return [row for row in rows if row.get("doc_id") in doc_ids]
+
+
+def _attach_document_names(
+    rows: list[dict[str, object]],
+    *,
+    document_names: dict[str, str],
+) -> list[dict[str, object]]:
+    if not document_names:
+        return rows
+    enriched: list[dict[str, object]] = []
+    for row in rows:
+        row_copy = dict(row)
+        doc_id = str(row_copy.get("doc_id") or "")
+        if doc_id and not row_copy.get("doc_name") and doc_id in document_names:
+            row_copy["doc_name"] = document_names[doc_id]
+        enriched.append(row_copy)
+    return enriched
 
 
 def _citation_text(citations: list[dict[str, object]]) -> str:
@@ -164,6 +296,195 @@ def _inventory_answer_lines(
         ]
     )
     return lines
+
+
+def _inventory_relationships(
+    con,
+    *,
+    entity_id: str,
+    case_id: str | None,
+) -> list[dict[str, object]]:
+    params: list[object] = [entity_id, entity_id, entity_id]
+    case_filter = ""
+    if case_id:
+        case_filter = "AND d.case_id = ?"
+        params.append(case_id)
+    params.append(12)
+    rows = con.execute(
+        f"""
+        SELECT
+          other.entity_id,
+          other.canonical_name,
+          other.entity_type,
+          r.relation_type,
+          r.confidence,
+          d.doc_id,
+          d.filename,
+          re.page,
+          coalesce(re.span_text, c.text, '')
+        FROM relationships r
+        JOIN entities other
+          ON other.entity_id = CASE
+            WHEN r.source_entity = ? THEN r.target_entity
+            ELSE r.source_entity
+          END
+        LEFT JOIN relationship_evidence re ON re.rel_id = r.rel_id
+        LEFT JOIN documents d ON d.doc_id = re.doc_id
+        LEFT JOIN chunks c ON c.chunk_id = re.chunk_id
+        WHERE (r.source_entity = ? OR r.target_entity = ?)
+        {case_filter}
+        ORDER BY r.confidence DESC, other.canonical_name
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+    grouped: dict[tuple[str, str], dict[str, object]] = {}
+    for row in rows:
+        key = (str(row[0]), str(row[3]))
+        if key not in grouped:
+            grouped[key] = {
+                "other_entity_id": row[0],
+                "other_name": row[1],
+                "other_type": row[2],
+                "relation_type": row[3],
+                "confidence": float(row[4] or 0.0),
+                "citations": [],
+            }
+        entry = grouped[key]
+        entry["confidence"] = max(entry["confidence"], float(row[4] or 0.0))
+        if row[5] or row[6]:
+            citation = {
+                "doc_id": row[5],
+                "doc_name": row[6] or row[5],
+                "page": row[7] if row[7] is not None else "?",
+                "span_text": row[8] or "",
+            }
+            if citation not in entry["citations"]:
+                entry["citations"].append(citation)
+
+    associations = list(grouped.values())
+    associations.sort(
+        key=lambda item: (
+            0 if str(item.get("other_type", "")).upper() == "PERSON" else 1,
+            -float(item.get("confidence", 0.0)),
+            str(item.get("other_name", "")).lower(),
+        )
+    )
+    return associations
+
+
+def _run_relationship_inventory_query(
+    con,
+    *,
+    query_text: str,
+    case_ref: str | None,
+    case_id: str | None,
+    entity_type: str,
+    recall_mode: str = "auto",
+) -> dict[str, object]:
+    rows = _inventory_rows(con, entity_type=entity_type, case_id=case_id)
+    query_id = str(uuid4())
+    claims: list[dict[str, object]] = []
+    lines = ["KEY FINDINGS"]
+
+    for row in rows[:INVENTORY_DISPLAY_LIMIT]:
+        entity_id = str(row[0])
+        entity_name = str(row[1])
+        associations = _inventory_relationships(con, entity_id=entity_id, case_id=case_id)
+        if associations:
+            for association in associations[:RELATIONSHIP_INVENTORY_ASSOCIATION_LIMIT]:
+                relation_type = str(association.get("relation_type") or "LINKED_TO")
+                relation_phrase = RELATIONSHIP_TEXT.get(
+                    relation_type,
+                    f"has relation {relation_type} with",
+                )
+                citations = list(association.get("citations", []))[:INVENTORY_CITATION_LIMIT]
+                claim_text = f"{entity_name} {relation_phrase} {association.get('other_name')}"
+                citation_suffix = f" {_citation_text(citations)}" if citations else ""
+                lines.append(f"- {claim_text}{citation_suffix}")
+                claims.append(
+                    {
+                        "text": claim_text,
+                        "citations": citations,
+                        "confidence": max(0.6, float(association.get("confidence", 0.0))),
+                    }
+                )
+            continue
+
+        citations = _inventory_citations(con, entity_id=entity_id)
+        citation_suffix = f" {_citation_text(citations)}" if citations else ""
+        lines.append(
+            f"- {entity_name} identified in case evidence, but no typed association was extracted{citation_suffix}"
+        )
+        claims.append(
+            {
+                "text": entity_name,
+                "citations": citations,
+                "confidence": 0.55,
+            }
+        )
+
+    if len(lines) == 1:
+        lines.append(f"No {entity_type.lower()} entities found for this scope.")
+
+    lines.extend(
+        [
+            "CONFIDENCE POSTURE",
+            "Association inventory prioritises typed graph relationships and falls back to direct alias citations when links are absent.",
+            "EVIDENCE GAPS",
+            "Some identifiers may appear in the corpus without a typed relationship; missing links usually indicate extraction gaps rather than confirmed isolation.",
+        ]
+    )
+
+    con.execute(
+        "INSERT INTO queries (query_id, query_text, intent, llm_backend) VALUES (?, ?, ?, ?)",
+        [query_id, query_text, "entity_relationship_inventory_query", "structured-sql"],
+    )
+    return {
+        "query_id": query_id,
+        "intent": "entity_relationship_inventory_query",
+        "entities": [],
+        "entities_resolved": [],
+        "case_scope": case_ref or "ALL_CASES",
+        "recall_mode": recall_mode,
+        "backend": "structured-sql",
+        "answer": "\n".join(lines),
+        "claims": claims,
+        "result_count": len(rows),
+        "top_results": [],
+    }
+
+
+def _missing_document_result(
+    *,
+    query_text: str,
+    case_ref: str | None,
+    recall_mode: str,
+    document_refs: list[str],
+) -> dict[str, object]:
+    query_id = str(uuid4())
+    requested = ", ".join(document_refs)
+    return {
+        "query_id": query_id,
+        "intent": "document_query",
+        "entities": [],
+        "entities_resolved": [],
+        "case_scope": case_ref or "ALL_CASES",
+        "recall_mode": recall_mode,
+        "backend": "structured-sql",
+        "answer": (
+            "KEY FINDINGS\n"
+            f"No indexed document matched: {requested}.\n"
+            "CONFIDENCE POSTURE\n"
+            "Filename matching is exact and currently limited to ingested document names.\n"
+            "EVIDENCE GAPS\n"
+            "If the document was recently added, it may still need to be ingested into the evidence store."
+        ),
+        "claims": [],
+        "result_count": 0,
+        "top_results": [],
+    }
 
 
 def _run_inventory_query(
@@ -245,6 +566,32 @@ def _compose_query_with_history(
         "Conversation context (most recent):\n"
         f"{history_block}\n\n"
         f"Current question:\n{query_text}"
+    )
+
+
+def _query_needs_history_context(
+    query_text: str,
+    parsed_current: dict[str, object],
+) -> bool:
+    trimmed = str(query_text or "").strip()
+    if not trimmed:
+        return False
+
+    if (
+        parsed_current.get("entities")
+        or parsed_current.get("document_refs")
+        or parsed_current.get("inventory_target")
+        or parsed_current.get("intent") != "general_query"
+    ):
+        return False
+
+    lowered = trimmed.lower()
+    token_count = len(re.findall(r"\w+", lowered))
+    if token_count > 6:
+        return False
+
+    return lowered.startswith("and ") or "what about" in lowered or bool(
+        FOLLOW_UP_CONTEXT_RE.search(lowered)
     )
 
 
@@ -350,11 +697,15 @@ async def run_query(
     recall_mode: str | None = None,
 ) -> dict[str, object]:
     """Orchestrate the query pipeline from parse through claim validation."""
-    effective_query = _compose_query_with_history(query_text, chat_history)
     timer = StageTimer(label=f"query:{query_text[:80]}")
     con = get_duck_connection(settings.duckdb_path)
     with timer.measure("parse"):
-        parsed = parser.parse_query(effective_query)
+        parsed = parser.parse_query(query_text)
+    effective_query = (
+        _compose_query_with_history(query_text, chat_history)
+        if _query_needs_history_context(query_text, parsed)
+        else query_text
+    )
     resolved_recall_mode, candidate_multiplier, min_doc_coverage = _resolve_recall_strategy(
         requested_mode=recall_mode,
         parsed_recall_priority=bool(parsed.get("recall_priority")),
@@ -364,18 +715,45 @@ async def run_query(
     graph_limit = max(50, settings.rerank_top_n * candidate_multiplier * 2)
     with timer.measure("case_lookup"):
         case_id = get_case_id_by_ref(con, case_ref) if case_ref else None
+    with timer.measure("document_lookup"):
+        document_scope = _resolve_document_scope(
+            con,
+            document_refs=list(parsed.get("document_refs", [])),
+            case_id=case_id,
+        )
+    scoped_doc_ids = {doc["doc_id"] for doc in document_scope}
+    document_names = {doc["doc_id"]: doc["filename"] for doc in document_scope}
+    if parsed.get("document_refs") and not scoped_doc_ids:
+        result = _missing_document_result(
+            query_text=effective_query,
+            case_ref=case_ref,
+            recall_mode=resolved_recall_mode,
+            document_refs=list(parsed.get("document_refs", [])),
+        )
+        timer.log_summary()
+        return result
     inventory_target = parsed.get("inventory_target")
 
     if isinstance(inventory_target, str) and inventory_target:
         with timer.measure("inventory_query"):
-            result = _run_inventory_query(
-                con,
-                query_text=effective_query,
-                case_ref=case_ref,
-                case_id=case_id,
-                entity_type=inventory_target,
-                recall_mode=resolved_recall_mode,
-            )
+            if parsed.get("relationship_focus"):
+                result = _run_relationship_inventory_query(
+                    con,
+                    query_text=effective_query,
+                    case_ref=case_ref,
+                    case_id=case_id,
+                    entity_type=inventory_target,
+                    recall_mode=resolved_recall_mode,
+                )
+            else:
+                result = _run_inventory_query(
+                    con,
+                    query_text=effective_query,
+                    case_ref=case_ref,
+                    case_id=case_id,
+                    entity_type=inventory_target,
+                    recall_mode=resolved_recall_mode,
+                )
         timer.log_summary()
         return result
 
@@ -403,13 +781,35 @@ async def run_query(
             )
         vector = await timer.await_stage("retrieve_vector", vector_task)
 
+        if scoped_doc_ids:
+            with timer.measure("document_filter"):
+                exact = _filter_rows_to_documents(exact, doc_ids=scoped_doc_ids)
+                fts = _filter_rows_to_documents(fts, doc_ids=scoped_doc_ids)
+                graph = _filter_rows_to_documents(graph, doc_ids=scoped_doc_ids)
+                vector = _filter_rows_to_documents(vector, doc_ids=scoped_doc_ids)
+                exact = _attach_document_names(exact, document_names=document_names)
+                fts = _attach_document_names(fts, document_names=document_names)
+                graph = _attach_document_names(graph, document_names=document_names)
+                vector = _attach_document_names(vector, document_names=document_names)
+                document_chunks = _document_chunk_rows(
+                    con,
+                    doc_ids=scoped_doc_ids,
+                    limit=max(DOCUMENT_CHUNK_LIMIT, settings.rerank_top_n),
+                )
+        else:
+            document_chunks = []
+
         if case_id:
             with timer.measure("case_doc_filter"):
                 allowed_doc_ids = get_doc_ids_for_case(con, case_id)
                 vector = [row for row in vector if row.get("doc_id") in allowed_doc_ids]
+                if document_chunks:
+                    document_chunks = [
+                        row for row in document_chunks if row.get("doc_id") in allowed_doc_ids
+                    ]
 
         with timer.measure("rerank"):
-            ranked = reranker.rerank_results([*exact, *fts, *vector, *graph])
+            ranked = reranker.rerank_results([*exact, *fts, *vector, *graph, *document_chunks])
             ranked = _with_document_coverage(
                 ranked,
                 top_n=settings.rerank_top_n,
@@ -421,6 +821,7 @@ async def run_query(
         with timer.measure("build_evidence"):
             packet = evidence_builder.build_evidence_packet(
                 query_text=effective_query,
+                query_intent=str(parsed["intent"]),
                 entities_resolved=entities_resolved,
                 ranked_results=ranked,
                 case_scope=case_ref or "ALL_CASES",

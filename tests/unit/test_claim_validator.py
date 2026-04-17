@@ -172,3 +172,22 @@ async def test_strict_mode_omits_partial_claims_from_answer(monkeypatch) -> None
     out = await validate_claims(payload)
     assert "supported claim" in out["answer"]
     assert "partial claim" not in out["answer"]
+
+
+@pytest.mark.asyncio
+async def test_validator_preserves_inline_citation_answer_without_structured_claims() -> None:
+    payload = {
+        "answer": (
+            "KEY FINDINGS\n"
+            "- Surveillance noted two meetings at North Yard [OC-INT-003.pdf, p.1]\n"
+            "CONFIDENCE POSTURE\n"
+            "Excerpt-backed summary."
+        ),
+        "claims": [],
+    }
+
+    out = await validate_claims(payload)
+
+    assert "North Yard" in out["answer"]
+    assert out["claims"] == []
+    assert out["grounding_controls"]["validation_skipped"] is True

@@ -183,6 +183,23 @@ async def validate_claims(answer_payload: dict[str, Any]) -> dict[str, Any]:
     has_inline_citation_markers = bool(CITATION_MARKER_RE.search(str(answer_text)))
     citations_by_claim = {c.get("text", ""): c.get("citations", []) for c in existing_claims}
 
+    if not existing_claims and has_inline_citation_markers:
+        return {
+            **answer_payload,
+            "claims": [],
+            "grounding_controls": {
+                "strict_facts_only": STRICT_FACTS_ONLY_MODE,
+                "inline_citation_markers_present": True,
+                "supported_claim_count": 0,
+                "partially_supported_claim_count": 0,
+                "unsupported_claim_count": 0,
+                "validation_skipped": True,
+                "validation_skip_reason": (
+                    "Answer already contains inline citations but no structured claim map was provided."
+                ),
+            },
+        }
+
     if existing_claims:
         claim_texts = [c.get("text", "") for c in existing_claims]
         for extracted_claim in extracted_claim_texts:

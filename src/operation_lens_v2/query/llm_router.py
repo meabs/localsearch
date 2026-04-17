@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from operation_lens_v2.config import settings
@@ -24,11 +25,21 @@ LOCAL_FINDINGS_LIMIT = 8
 OPENROUTER_FINDINGS_LIMIT = 10
 EXACT_FINDINGS_LIMIT = 10
 RELATIONSHIP_FINDINGS_LIMIT = 8
+CHUNK_FINDINGS_LIMIT = 6
+DOCUMENT_ANALYSIS_CHUNK_LIMIT = 8
+DOCUMENT_ANALYSIS_TEXT_LIMIT = 1400
+CHUNK_FALLBACK_GAP = (
+    "This briefing was assembled from retrieved document excerpts because no high-confidence "
+    "typed relationships were available for the requested scope."
+)
 RELATIONSHIP_MISSING_MESSAGE = (
     "No strongly supported relationships were found in the current evidence packet."
 )
 ENTITY_LINKAGE_POSTURE = "Identifier/entity linkage is direct; typed relationships may be absent."
 NO_GRAPH_RELATIONSHIP_GAP = "No high-confidence graph relationships met threshold for this query."
+DOCUMENT_SUMMARY_GAP = (
+    "Document summaries depend on OCR/chunk quality; weak extraction or redactions can hide detail."
+)
 FALLBACK_POSTURE_LINES = [
     "",
     "Confidence Posture:",
@@ -40,6 +51,39 @@ FALLBACK_POSTURE_LINES = [
     "- Relationships with a single document source need corroboration.",
     "- Mentions without typed relationships are excluded from findings.",
 ]
+DOCUMENT_BOILERPLATE_PHRASES = (
+    "official-sensitive",
+    "daily intelligence report",
+    "analyst:",
+    "grading (source)",
+    "grading (info)",
+    "handling:",
+    "5x5x5",
+)
+DOCUMENT_FINDING_KEYWORDS = (
+    "observed",
+    "meeting",
+    "property",
+    "address",
+    "vehicle",
+    "van",
+    "phone",
+    "call",
+    "contact",
+    "crime",
+    "report",
+    "anonymous",
+    "surveillance",
+    "identified",
+    "linked",
+    "used",
+    "visited",
+    "delivery",
+    "cash",
+    "account",
+)
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|;\s+")
+WHITESPACE_RE = re.compile(r"\s+")
 
 
 def _aggregate_exact_matches(exact_matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -190,6 +234,224 @@ def _deterministic_relationship_lines(
     return lines + FALLBACK_POSTURE_LINES, claims
 
 
+def _chunk_fallback_lines(chunks: list[dict[str, Any]]) -> list[str]:
+    lines = ["KEY FINDINGS"]
+    seen: set[tuple[str, Any, str]] = set()
+
+    for chunk in chunks[:CHUNK_FINDINGS_LIMIT]:
+        text = " ".join(str(chunk.get("text") or "").split())
+        if not text:
+            continue
+        doc_label = str(chunk.get("doc_name") or chunk.get("doc_id") or UNKNOWN_DOC)
+        page = chunk.get("page") or "?"
+        snippet = text[:260].rstrip()
+        if len(text) > 260:
+            snippet = f"{snippet}..."
+        key = (doc_label, page, snippet)
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"- {snippet} [{doc_label}, p.{page}]")
+
+    if len(lines) == 1:
+        lines.append("No retrieved document excerpts were available for this scope.")
+
+    lines.extend(
+        [
+            "CONFIDENCE POSTURE",
+            CHUNK_FALLBACK_GAP,
+            "EVIDENCE GAPS",
+            "- Findings reflect excerpt-level retrieval and may omit context from unreturned pages.",
+            "- Relationship extraction may still be absent even when the document contains useful narrative evidence.",
+        ]
+    )
+    return lines
+
+
+def _clean_document_text(text: Any) -> str:
+    return WHITESPACE_RE.sub(" ", str(text or "")).strip()
+
+
+def _looks_like_document_boilerplate(sentence: str) -> bool:
+    lowered = sentence.lower()
+    if any(phrase in lowered for phrase in DOCUMENT_BOILERPLATE_PHRASES):
+        return True
+    if sentence.count("|") >= 2:
+        return True
+    letters = [char for char in sentence if char.isalpha()]
+    if letters:
+        uppercase_ratio = sum(1 for char in letters if char.isupper()) / len(letters)
+        if uppercase_ratio > 0.7 and len(sentence) < 220:
+            return True
+    return False
+
+
+def _score_document_sentence(sentence: str) -> int:
+    lowered = sentence.lower()
+    score = 0
+    score += sum(2 for keyword in DOCUMENT_FINDING_KEYWORDS if keyword in lowered)
+    if re.search(r"\b\d{1,2}[:/.-]\d{1,2}(?:[:/.-]\d{2,4})?\b", sentence):
+        score += 2
+    if re.search(r"\b\d{1,2}:\d{2}\b", sentence):
+        score += 2
+    if re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", sentence):
+        score += 1
+    if re.search(r"\b(?:Road|Street|Rd|Lane|Avenue|Close|Court|Drive|Yard|Dock|Estate|House)\b", sentence):
+        score += 1
+    if 60 <= len(sentence) <= 220:
+        score += 2
+    elif len(sentence) > 240:
+        score -= 2
+    if "redacted" in lowered:
+        score -= 1
+    return score
+
+
+def _document_summary_lines(
+    chunks: list[dict[str, Any]],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    candidates: list[dict[str, Any]] = []
+    seen_sentences: set[str] = set()
+
+    for chunk in chunks:
+        cleaned_text = _clean_document_text(chunk.get("text"))
+        if not cleaned_text:
+            continue
+        doc_label = str(chunk.get("doc_name") or chunk.get("doc_id") or UNKNOWN_DOC)
+        page = chunk.get("page") or "?"
+        for sentence in SENTENCE_SPLIT_RE.split(cleaned_text):
+            normalized = _clean_document_text(sentence)
+            if len(normalized) < 45:
+                continue
+            lowered = normalized.lower()
+            if lowered in seen_sentences:
+                continue
+            if _looks_like_document_boilerplate(normalized):
+                continue
+            score = _score_document_sentence(normalized)
+            if score <= 0:
+                continue
+            seen_sentences.add(lowered)
+            candidates.append(
+                {
+                    "text": normalized,
+                    "doc_id": doc_label,
+                    "page": page,
+                    "score": score,
+                    "span_text": cleaned_text,
+                }
+            )
+
+    candidates.sort(
+        key=lambda item: (int(item["score"]), -int(item["page"]) if str(item["page"]).isdigit() else 0),
+        reverse=True,
+    )
+
+    selected: list[dict[str, Any]] = []
+    seen_pages: set[tuple[str, Any]] = set()
+    for candidate in candidates:
+        page_key = (str(candidate["doc_id"]), candidate["page"])
+        if page_key in seen_pages and len(selected) >= 3:
+            continue
+        seen_pages.add(page_key)
+        selected.append(candidate)
+        if len(selected) >= CHUNK_FINDINGS_LIMIT:
+            break
+
+    if not selected:
+        return _chunk_fallback_lines(chunks), []
+
+    lines = ["KEY FINDINGS"]
+    claims: list[dict[str, Any]] = []
+    for finding in selected:
+        lines.append(f"- {finding['text']} [{finding['doc_id']}, p.{finding['page']}]")
+        claims.append(
+            {
+                "text": str(finding["text"]),
+                "citations": [
+                    {
+                        "doc_id": finding["doc_id"],
+                        "doc_name": finding["doc_id"],
+                        "page": finding["page"],
+                        "span_text": finding["span_text"],
+                    }
+                ],
+                "confidence": 0.72,
+            }
+        )
+
+    lines.extend(
+        [
+            "CONFIDENCE POSTURE",
+            "Summary prioritised concrete operational statements over document headers and handling metadata.",
+            "EVIDENCE GAPS",
+            DOCUMENT_SUMMARY_GAP,
+        ]
+    )
+    return lines, claims
+
+
+async def _local_document_analysis(
+    evidence_packet: dict[str, Any],
+    chunks: list[dict[str, Any]],
+) -> str | None:
+    excerpts = []
+    for chunk in chunks[:DOCUMENT_ANALYSIS_CHUNK_LIMIT]:
+        cleaned_text = _clean_document_text(chunk.get("text"))
+        if not cleaned_text:
+            continue
+        excerpts.append(
+            {
+                "doc_id": chunk.get("doc_name") or chunk.get("doc_id") or UNKNOWN_DOC,
+                "page": chunk.get("page") or "?",
+                "text": cleaned_text[:DOCUMENT_ANALYSIS_TEXT_LIMIT],
+            }
+        )
+    if not excerpts:
+        return None
+
+    prompt_obj = {
+        "task": "Summarise one investigative document into operational findings",
+        "query": evidence_packet.get("query_text"),
+        "case_scope": evidence_packet.get("case_scope", "ALL_CASES"),
+        "instructions": [
+            "Ignore cover-sheet metadata, grading fields, handling codes, and repeated headers unless operationally relevant.",
+            "Extract concrete findings from the content itself.",
+            "Prefer events, locations, timings, assets, leads, and reported activity.",
+            "Keep each finding concise and cite it as [DOC_ID, p.N].",
+            "Return plain text only with sections: KEY FINDINGS, CONFIDENCE POSTURE, EVIDENCE GAPS.",
+        ],
+        "excerpts": excerpts,
+    }
+    try:
+        client = get_http_client(base_url=settings.ollama_base_url, timeout=settings.ollama_timeout)
+        response = await client.post(
+            "/api/generate",
+            json={
+                "model": settings.local_reasoning_model,
+                "prompt": (
+                    "You are an intelligence analyst preparing a succinct document briefing.\n"
+                    "Return plain text only.\n"
+                    "Use exact sections: KEY FINDINGS, CONFIDENCE POSTURE, EVIDENCE GAPS.\n"
+                    "In KEY FINDINGS, provide 3 to 6 bullet points.\n"
+                    "Each bullet must include exactly one citation in the form [DOC_ID, p.N].\n"
+                    "Do not repeat the document title or classification banner as a finding.\n\n"
+                    f"{json.dumps(prompt_obj)}"
+                ),
+                "stream": False,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        text = _clean_document_text(payload.get("response", ""))
+        if text and "[DOC" in text or (text and re.search(r"\[[^\]]+,\s*p\.\d+\]", text)):
+            return str(payload.get("response", "")).strip()
+        return str(payload.get("response", "")).strip() or None
+    except Exception as exc:
+        logger.warning("Local document analysis failed: %s", exc)
+        return None
+
+
 async def _local_ollama_analysis(
     evidence_packet: dict[str, Any],
     findings: list[dict[str, Any]],
@@ -330,14 +592,30 @@ async def generate_answer(
     evidence_packet: dict[str, Any], *, use_cloud: bool = False
 ) -> dict[str, Any]:
     """Generate an answer from the evidence packet, routing to local or cloud LLM."""
+    query_intent = str(evidence_packet.get("query_intent") or "")
     relationships = evidence_packet.get("relationships", [])
     exact_matches = evidence_packet.get("exact_matches", [])
+    chunks = evidence_packet.get("chunks", [])
     backend_used = "deterministic-fallback"
+
+    if query_intent == "document_summary_query" and chunks:
+        local_document_analysis = await _local_document_analysis(evidence_packet, chunks)
+        fallback_lines, claims = _document_summary_lines(chunks)
+        if local_document_analysis:
+            answer = local_document_analysis
+            claims = []
+            backend_used = settings.local_reasoning_model
+        else:
+            answer = "\n".join(fallback_lines)
+        return {"backend": backend_used, "answer": answer, "claims": claims}
 
     if not relationships:
         exact_findings = _aggregate_exact_matches(exact_matches)
         if not exact_findings:
-            answer = RELATIONSHIP_MISSING_MESSAGE
+            if chunks:
+                answer = "\n".join(_chunk_fallback_lines(chunks))
+            else:
+                answer = RELATIONSHIP_MISSING_MESSAGE
             claims = []
         else:
             people: list[str] = []

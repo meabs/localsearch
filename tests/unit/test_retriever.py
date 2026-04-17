@@ -11,6 +11,7 @@ from operation_lens_v2.ingestion.duck_store import init_db
 from operation_lens_v2.query import reranker
 from operation_lens_v2.query.parser import parse_query
 from operation_lens_v2.query.pipeline import (
+    _query_needs_history_context,
     _resolve_recall_strategy,
     _run_inventory_query,
     _with_document_coverage,
@@ -86,9 +87,31 @@ def test_parse_query_routes_bare_phone_inventory_search():
     assert parsed["inventory_target"] == "PHONE"
 
 
+def test_parse_query_routes_phone_association_list_to_relationship_inventory():
+    parsed = parse_query("List all phone numbers linked to this case and who they are associated with.")
+    assert parsed["intent"] == "entity_relationship_inventory_query"
+    assert parsed["inventory_target"] == "PHONE"
+    assert parsed["relationship_focus"] is True
+
+
+def test_query_needs_history_context_only_for_short_referential_followups():
+    parsed_address = parse_query("22 Linton Gardens")
+    assert parsed_address["intent"] == "general_query"
+    assert _query_needs_history_context("22 Linton Gardens", parsed_address) is False
+
+    parsed_followup = parse_query("what about him?")
+    assert _query_needs_history_context("what about him?", parsed_followup) is True
+
+
 def test_parse_query_sets_recall_priority_hints():
     parsed = parse_query("Give me a comprehensive report, don't miss related docs")
     assert parsed["recall_priority"] is True
+
+
+def test_parse_query_detects_document_summary_reference():
+    parsed = parse_query("Summarise key findings from OC-INT-003.pdf")
+    assert parsed["intent"] == "document_summary_query"
+    assert parsed["document_refs"] == ["OC-INT-003.pdf"]
 
 
 def test_inventory_query_returns_exact_chunk_citations():
@@ -132,6 +155,91 @@ def test_inventory_query_deduplicates_repeated_citations():
     assert len(citations) == 1
 
 
+def test_inventory_query_deduplicates_same_page_across_multiple_chunks():
+    con = init_db(":memory:")
+
+    import uuid
+
+    case_id = str(uuid.uuid4())
+    doc_id = str(uuid.uuid4())
+    entity_id = str(uuid.uuid4())
+    chunk_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    alias_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+
+    con.execute(
+        "INSERT INTO cases (case_id, case_ref, case_name) VALUES (?, ?, ?)",
+        [case_id, "OP_PAGE", "Page Dedup Case"],
+    )
+    con.execute(INSERT_DOCUMENT_SQL, [doc_id, case_id, "page-dedup.pdf", "/tmp/page-dedup.pdf", 1])
+    con.execute(
+        INSERT_CHUNK_SQL,
+        [chunk_ids[0], doc_id, 1, 0, "First chunk says phone +44 7700 900123 was used.", 10],
+    )
+    con.execute(
+        INSERT_CHUNK_SQL,
+        [chunk_ids[1], doc_id, 1, 1, "Second chunk on same page repeats phone +44 7700 900123 with more context.", 14],
+    )
+    con.execute(INSERT_ENTITY_SQL, [entity_id, "+447700900123", "PHONE", doc_id])
+    con.execute(INSERT_ALIAS_SQL, [alias_ids[0], entity_id, "+44 7700 900123", doc_id, chunk_ids[0]])
+    con.execute(INSERT_ALIAS_SQL, [alias_ids[1], entity_id, "+44 7700 900123", doc_id, chunk_ids[1]])
+
+    result = _run_inventory_query(
+        con,
+        query_text="phone numbers",
+        case_ref=None,
+        case_id=None,
+        entity_type="PHONE",
+    )
+
+    citations = result["claims"][0]["citations"]
+    assert len(citations) == 1
+    assert citations[0]["page"] == 1
+    assert "more context" in citations[0]["span_text"]
+
+
+def test_inventory_query_deduplicates_same_filename_page_across_duplicate_docs():
+    con = init_db(":memory:")
+
+    import uuid
+
+    case_id = str(uuid.uuid4())
+    entity_id = str(uuid.uuid4())
+    doc_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    chunk_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    alias_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+
+    con.execute(
+        "INSERT INTO cases (case_id, case_ref, case_name) VALUES (?, ?, ?)",
+        [case_id, "OP_DUP", "Duplicate Doc Case"],
+    )
+    for doc_id in doc_ids:
+        con.execute(INSERT_DOCUMENT_SQL, [doc_id, case_id, "same-file.pdf", f"/tmp/{doc_id}.pdf", 1])
+    con.execute(
+        INSERT_CHUNK_SQL,
+        [chunk_ids[0], doc_ids[0], 1, 0, "First duplicate doc mentions +44 7700 900123.", 10],
+    )
+    con.execute(
+        INSERT_CHUNK_SQL,
+        [chunk_ids[1], doc_ids[1], 1, 0, "Second duplicate doc mentions +44 7700 900123 with richer phone context.", 14],
+    )
+    con.execute(INSERT_ENTITY_SQL, [entity_id, "+447700900123", "PHONE", doc_ids[0]])
+    con.execute(INSERT_ALIAS_SQL, [alias_ids[0], entity_id, "+44 7700 900123", doc_ids[0], chunk_ids[0]])
+    con.execute(INSERT_ALIAS_SQL, [alias_ids[1], entity_id, "+44 7700 900123", doc_ids[1], chunk_ids[1]])
+
+    result = _run_inventory_query(
+        con,
+        query_text="phone numbers",
+        case_ref=None,
+        case_id=None,
+        entity_type="PHONE",
+    )
+
+    citations = result["claims"][0]["citations"]
+    assert len(citations) == 1
+    assert citations[0]["doc_name"] == "same-file.pdf"
+    assert "richer phone context" in citations[0]["span_text"]
+
+
 @pytest.mark.asyncio
 async def test_run_query_routes_phone_numbers_to_inventory(tmp_path, monkeypatch):
     await close_runtime_resources()
@@ -164,6 +272,175 @@ async def test_run_query_routes_phone_numbers_to_inventory(tmp_path, monkeypatch
     assert result["intent"] == "entity_inventory_query"
     assert result["backend"] == "structured-sql"
     assert "+44 7700 900123" in result["answer"]
+
+
+@pytest.mark.asyncio
+async def test_run_query_filters_invalid_phone_inventory_entities(tmp_path, monkeypatch):
+    await close_runtime_resources()
+    db_path = tmp_path / "phone-filter.duckdb"
+    con = init_db(str(db_path))
+    monkeypatch.setattr(settings, "duckdb_path", str(db_path))
+
+    import uuid
+
+    case_id = str(uuid.uuid4())
+    doc_id = str(uuid.uuid4())
+    con.execute(
+        "INSERT INTO cases (case_id, case_ref, case_name) VALUES (?, ?, ?)",
+        [case_id, "OP_FILTER", "Phone Filter Case"],
+    )
+    con.execute(INSERT_DOCUMENT_SQL, [doc_id, case_id, "filter.pdf", "/tmp/filter.pdf", 1])
+
+    seeded_entities = [
+        ("+447700900123", "PHONE", "+44 7700 900123 phone used by the subject."),
+        ("+20240205", "PHONE", "A malformed extracted date should not survive inventory filtering."),
+        ("Tomek", "PHONE", "A name mislabelled as a phone should not survive inventory filtering."),
+        ("+4470331234567890123456", "PHONE", "An overlong digit string should not survive inventory filtering."),
+        ("number ending four eight one", "PHONE", "A prose fragment should not survive inventory filtering."),
+        ("+23194400982115", "PHONE", "Primary banking account 23-19-44 00982115 at the same challenger bank."),
+    ]
+
+    for canonical_name, entity_type, chunk_text in seeded_entities:
+        entity_id = str(uuid.uuid4())
+        chunk_id = str(uuid.uuid4())
+        alias_id = str(uuid.uuid4())
+        con.execute(INSERT_CHUNK_SQL, [chunk_id, doc_id, 1, 0, chunk_text, 12])
+        con.execute(INSERT_ENTITY_SQL, [entity_id, canonical_name, entity_type, doc_id])
+        con.execute(INSERT_ALIAS_SQL, [alias_id, entity_id, canonical_name, doc_id, chunk_id])
+
+    result = await run_query("phone numbers")
+
+    assert result["intent"] == "entity_inventory_query"
+    assert "+447700900123" in result["answer"]
+    assert "+20240205" not in result["answer"]
+    assert "Tomek" not in result["answer"]
+    assert "+4470331234567890123456" not in result["answer"]
+    assert "number ending four eight one" not in result["answer"]
+    assert "+23194400982115" not in result["answer"]
+
+
+@pytest.mark.asyncio
+async def test_run_query_phone_relationship_inventory_returns_associations(tmp_path, monkeypatch):
+    await close_runtime_resources()
+    db_path = tmp_path / "phone-associations.duckdb"
+    con = init_db(str(db_path))
+    monkeypatch.setattr(settings, "duckdb_path", str(db_path))
+
+    import uuid
+
+    case_id = str(uuid.uuid4())
+    doc_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+    phone_id = str(uuid.uuid4())
+    person_id = str(uuid.uuid4())
+    rel_id = str(uuid.uuid4())
+    evidence_id = str(uuid.uuid4())
+
+    con.execute(
+        "INSERT INTO cases (case_id, case_ref, case_name) VALUES (?, ?, ?)",
+        [case_id, "OP_ASSOC", "Association Case"],
+    )
+    con.execute(INSERT_DOCUMENT_SQL, [doc_id, case_id, "phone-intel.pdf", "/tmp/phone-intel.pdf", 1])
+    con.execute(
+        INSERT_CHUNK_SQL,
+        [
+            chunk_id,
+            doc_id,
+            1,
+            0,
+            "Phone +44 7700 900123 is associated with Marcus Webb in recent call data.",
+            16,
+        ],
+    )
+    con.execute(INSERT_ENTITY_SQL, [phone_id, "+44 7700 900123", "PHONE", doc_id])
+    con.execute(INSERT_ENTITY_SQL, [person_id, "Marcus Webb", "PERSON", doc_id])
+    con.execute(INSERT_ALIAS_SQL, [str(uuid.uuid4()), phone_id, "+44 7700 900123", doc_id, chunk_id])
+    con.execute(INSERT_ALIAS_SQL, [str(uuid.uuid4()), person_id, "Marcus Webb", doc_id, chunk_id])
+    con.execute(
+        """
+        INSERT INTO relationships (rel_id, source_entity, target_entity, relation_type, confidence)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [rel_id, phone_id, person_id, "ASSOCIATED_WITH", 0.92],
+    )
+    con.execute(
+        """
+        INSERT INTO relationship_evidence (
+          evidence_id, rel_id, chunk_id, doc_id, page,
+          span_start, span_end, span_text, extraction_method
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            evidence_id,
+            rel_id,
+            chunk_id,
+            doc_id,
+            1,
+            0,
+            74,
+            "Phone +44 7700 900123 is associated with Marcus Webb in recent call data.",
+            "pattern",
+        ],
+    )
+
+    result = await run_query(
+        "List all phone numbers linked to this case and who they are associated with.",
+        case_ref="OP_ASSOC",
+    )
+
+    assert result["intent"] == "entity_relationship_inventory_query"
+    assert result["backend"] == "structured-sql"
+    assert "+44 7700 900123 is associated with Marcus Webb" in result["answer"]
+    assert result["claims"]
+
+
+@pytest.mark.asyncio
+async def test_run_query_does_not_let_chat_history_reclassify_self_contained_query(
+    tmp_path,
+    monkeypatch,
+):
+    await close_runtime_resources()
+    db_path = tmp_path / "chat-history-routing.duckdb"
+    con = init_db(str(db_path))
+    monkeypatch.setattr(settings, "duckdb_path", str(db_path))
+    monkeypatch.setattr(
+        "operation_lens_v2.query.retriever_vector.retrieve_vector",
+        AsyncMock(return_value=[]),
+    )
+
+    observed_packet: dict[str, object] = {}
+
+    async def fake_generate_answer(packet, *, use_cloud: bool):
+        observed_packet.update(packet)
+        return {
+            "backend": "local-test",
+            "answer": "KEY FINDINGS\nNo strongly supported relationships were found in the current evidence packet.",
+            "claims": [],
+        }
+
+    async def passthrough_validate(payload):
+        return {**payload, "claims": []}
+
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.llm_router.generate_answer",
+        fake_generate_answer,
+    )
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.claim_validator.validate_claims",
+        passthrough_validate,
+    )
+
+    result = await run_query(
+        "22 Linton Gardens",
+        chat_history=[
+            {"role": "user", "content": "List all phone numbers linked to this case and who they are associated with."},
+            {"role": "assistant", "content": "KEY FINDINGS\n- +447712345678 is associated with Marcus Webb [NF-TEC-008.pdf, p.1]"},
+            {"role": "user", "content": "Show location movements for Marcus Webb in chronological order with source references."},
+        ],
+    )
+
+    assert result["intent"] == "general_query"
+    assert observed_packet["query_text"] == "22 Linton Gardens"
 
 
 @pytest.mark.asyncio
@@ -228,6 +505,7 @@ async def test_run_query_preserves_graph_backed_relationship_flow(tmp_path, monk
 
     async def fake_generate_answer(packet, *, use_cloud: bool):
         assert packet["relationships"]
+        assert packet["query_intent"] == "entity_relationship_query"
         return {
             "backend": "local-test",
             "answer": "Marcus Webb was observed at North Yard.",
@@ -274,6 +552,81 @@ async def test_run_query_preserves_graph_backed_relationship_flow(tmp_path, monk
     assert result["backend"] == "local-test"
     assert result["claims"][0]["status"] == "SUPPORTED"
     assert result["top_results"][0]["source"] == "graph"
+
+
+@pytest.mark.asyncio
+async def test_run_query_summarises_requested_document_from_chunks(tmp_path, monkeypatch):
+    await close_runtime_resources()
+    db_path = tmp_path / "document-query.duckdb"
+    con = init_db(str(db_path))
+    monkeypatch.setattr(settings, "duckdb_path", str(db_path))
+    monkeypatch.setattr(
+        "operation_lens_v2.query.retriever_vector.retrieve_vector",
+        AsyncMock(return_value=[]),
+    )
+    observed_packet: dict[str, object] = {}
+
+    async def fake_generate_answer(packet, *, use_cloud: bool):
+        observed_packet.update(packet)
+        return {
+            "backend": "local-doc-test",
+            "answer": (
+                "KEY FINDINGS\n"
+                "- Surveillance noted two meetings at North Yard involving a white Transit van "
+                "[OC-INT-003.pdf, p.1]\n"
+                "CONFIDENCE POSTURE\n"
+                "Excerpt-backed summary.\n"
+                "EVIDENCE GAPS\n"
+                "Single document."
+            ),
+            "claims": [],
+        }
+
+    async def passthrough_validate(payload):
+        return {**payload, "claims": []}
+
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.llm_router.generate_answer",
+        fake_generate_answer,
+    )
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.claim_validator.validate_claims",
+        passthrough_validate,
+    )
+
+    import uuid
+
+    case_id = str(uuid.uuid4())
+    doc_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+
+    con.execute(
+        "INSERT INTO cases (case_id, case_ref, case_name) VALUES (?, ?, ?)",
+        [case_id, "OP_DOC", "Document Case"],
+    )
+    con.execute(
+        INSERT_DOCUMENT_SQL,
+        [doc_id, case_id, "OC-INT-003.pdf", "/tmp/OC-INT-003.pdf", 1],
+    )
+    con.execute(
+        INSERT_CHUNK_SQL,
+        [
+            chunk_id,
+            doc_id,
+            1,
+            0,
+            "Surveillance noted two meetings at North Yard involving a white Transit van.",
+            14,
+        ],
+    )
+
+    result = await run_query("Summarise key findings from OC-INT-003.pdf")
+
+    assert result["intent"] == "document_summary_query"
+    assert result["result_count"] >= 1
+    assert "North Yard" in result["answer"]
+    assert "OC-INT-003.pdf" in result["answer"]
+    assert observed_packet["query_intent"] == "document_summary_query"
 
 
 # ── FTS retriever ──────────────────────────────────────────────────────────────

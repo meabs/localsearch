@@ -7,6 +7,7 @@ from uuid import uuid4
 def build_evidence_packet(
     *,
     query_text: str,
+    query_intent: str,
     entities_resolved: list[dict[str, str]],
     ranked_results: list[dict[str, Any]],
     case_scope: str = "ALL_CASES",
@@ -51,6 +52,7 @@ def build_evidence_packet(
         {
             "chunk_id": row.get("chunk_id"),
             "doc_id": row.get("doc_id"),
+            "doc_name": row.get("doc_name"),
             "page": row.get("page"),
             "text": row.get("text"),
         }
@@ -60,6 +62,7 @@ def build_evidence_packet(
     return {
         "query_id": str(uuid4()),
         "query_text": query_text,
+        "query_intent": query_intent,
         "case_scope": case_scope,
         "entities_resolved": entities_resolved,
         "relationships": relationships,
