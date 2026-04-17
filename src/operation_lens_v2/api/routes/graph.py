@@ -10,9 +10,16 @@ from fastapi.responses import FileResponse
 
 from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion import duck_store
-from operation_lens_v2.ingestion.duck_store import connect
+from operation_lens_v2.ingestion.duck_store import connect, get_case_id_by_ref
 from operation_lens_v2.ingestion.entity_schema import get_schema
 from operation_lens_v2.services.geocoder import GeocoderDisabled, geocode_entity
+from operation_lens_v2.services.graph_algorithms import (
+    centrality_report,
+    detect_communities,
+    expand_neighbourhood,
+    shortest_path,
+)
+from operation_lens_v2.services.graph_backend import DuckDBGraphBackend, EdgeFilter
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 IMAGE_UPLOAD_PARAM = File(...)
@@ -816,3 +823,174 @@ def vehicle_track(entity_id: str) -> dict[str, object]:
         "entity_type": vehicle_row[1],
         "points": points,
     }
+
+
+# ----------------------------------------------------------------------
+# Phase 8 — graph algorithms: path finding, expansion, centrality, communities
+# ----------------------------------------------------------------------
+def _split_csv(raw: str | None) -> tuple[str, ...]:
+    if not raw:
+        return ()
+    return tuple(part.strip().upper() for part in raw.split(",") if part.strip())
+
+
+def _edge_filter_from_query(
+    con,
+    *,
+    case_ref: str | None,
+    min_confidence: float,
+    exclude_relation_types: str | None,
+    include_relation_types: str | None,
+) -> EdgeFilter:
+    case_id: str | None = None
+    if case_ref:
+        case_id = get_case_id_by_ref(con, case_ref)
+        if case_id is None:
+            raise HTTPException(status_code=404, detail=f"Unknown case_ref: {case_ref}")
+    min_conf = max(0.0, min(1.0, float(min_confidence)))
+    return EdgeFilter(
+        case_id=case_id,
+        min_confidence=min_conf,
+        exclude_relation_types=_split_csv(exclude_relation_types),
+        include_relation_types=_split_csv(include_relation_types),
+    )
+
+
+@router.get("/path")
+def path(
+    source: str,
+    target: str,
+    k: int = 3,
+    min_confidence: float = 0.0,
+    exclude_relation_types: str | None = None,
+    include_relation_types: str | None = None,
+    case_ref: str | None = None,
+    cutoff_hops: int | None = 6,
+) -> dict[str, object]:
+    """Return up to k confidence-weighted paths between two entities.
+
+    `source` and `target` accept either entity_id or canonical name / alias.
+    Constraints (`min_confidence`, `exclude_relation_types`) trim the graph
+    before traversal so pathfinding avoids noise edges (e.g. MENTIONED_WITH).
+    """
+    con = connect(settings.duckdb_path)
+    backend = DuckDBGraphBackend(con)
+    source_id = backend.resolve_entity_id(source)
+    target_id = backend.resolve_entity_id(target)
+    if not source_id:
+        raise HTTPException(status_code=404, detail=f"Source not found: {source}")
+    if not target_id:
+        raise HTTPException(status_code=404, detail=f"Target not found: {target}")
+
+    edge_filter = _edge_filter_from_query(
+        con,
+        case_ref=case_ref,
+        min_confidence=min_confidence,
+        exclude_relation_types=exclude_relation_types,
+        include_relation_types=include_relation_types,
+    )
+    paths = shortest_path(
+        backend,
+        source_id=source_id,
+        target_id=target_id,
+        edge_filter=edge_filter,
+        k=max(1, min(10, int(k))),
+        cutoff_hops=cutoff_hops,
+    )
+    return {
+        "source": {"query": source, "entity_id": source_id},
+        "target": {"query": target, "entity_id": target_id},
+        "paths": paths,
+        "path_count": len(paths),
+        "constraints": {
+            "min_confidence": edge_filter.min_confidence,
+            "exclude_relation_types": list(edge_filter.exclude_relation_types),
+            "include_relation_types": list(edge_filter.include_relation_types),
+            "case_ref": case_ref,
+            "cutoff_hops": cutoff_hops,
+        },
+    }
+
+
+@router.get("/expand")
+def expand(
+    entity_id: str,
+    limit: int = 30,
+    min_confidence: float = 0.0,
+    exclude_relation_types: str | None = None,
+    include_relation_types: str | None = None,
+    case_ref: str | None = None,
+) -> dict[str, object]:
+    """One-hop expansion around a node. Accepts entity_id OR a name/alias."""
+    con = connect(settings.duckdb_path)
+    backend = DuckDBGraphBackend(con)
+    resolved = backend.resolve_entity_id(entity_id)
+    if not resolved:
+        raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+
+    edge_filter = _edge_filter_from_query(
+        con,
+        case_ref=case_ref,
+        min_confidence=min_confidence,
+        exclude_relation_types=exclude_relation_types,
+        include_relation_types=include_relation_types,
+    )
+    bundle = expand_neighbourhood(
+        backend,
+        entity_id=resolved,
+        edge_filter=edge_filter,
+        limit=max(1, min(200, int(limit))),
+    )
+    return bundle
+
+
+@router.get("/centrality")
+def centrality(
+    metric: str = "degree",
+    top_n: int = 20,
+    min_confidence: float = 0.0,
+    exclude_relation_types: str | None = None,
+    include_relation_types: str | None = None,
+    case_ref: str | None = None,
+) -> dict[str, object]:
+    """Rank entities by degree / betweenness / pagerank centrality."""
+    con = connect(settings.duckdb_path)
+    backend = DuckDBGraphBackend(con)
+    edge_filter = _edge_filter_from_query(
+        con,
+        case_ref=case_ref,
+        min_confidence=min_confidence,
+        exclude_relation_types=exclude_relation_types,
+        include_relation_types=include_relation_types,
+    )
+    return centrality_report(
+        backend,
+        edge_filter=edge_filter,
+        metric=metric,
+        top_n=max(1, min(200, int(top_n))),
+    )
+
+
+@router.get("/communities")
+def communities(
+    min_confidence: float = 0.0,
+    resolution: float = 1.0,
+    exclude_relation_types: str | None = None,
+    include_relation_types: str | None = None,
+    case_ref: str | None = None,
+) -> dict[str, object]:
+    """Louvain community detection. `resolution`>1 fragments more aggressively."""
+    con = connect(settings.duckdb_path)
+    backend = DuckDBGraphBackend(con)
+    edge_filter = _edge_filter_from_query(
+        con,
+        case_ref=case_ref,
+        min_confidence=min_confidence,
+        exclude_relation_types=exclude_relation_types,
+        include_relation_types=include_relation_types,
+    )
+    return detect_communities(
+        backend,
+        edge_filter=edge_filter,
+        resolution=max(0.1, min(5.0, float(resolution))),
+    )

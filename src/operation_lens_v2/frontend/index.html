@@ -140,6 +140,80 @@
                   <div class="legend-item"><div class="legend-dot" style="background:#5a8a7a;"></div>Other</div>
                   <div class="legend-item">Cross-document links highlighted</div>
                 </div>
+
+                <div id="graph-insights" class="panel-card">
+                  <div class="card-pad">
+                    <div class="panel-titlebar">
+                      <div>
+                        <div class="panel-overline">Investigator tools</div>
+                        <div class="panel-title">Path finder &amp; network insights</div>
+                        <p class="panel-copy">Trace the strongest evidence-backed chain between two entities, or see who brokers the network.</p>
+                      </div>
+                      <div class="panel-chip">Phase 08</div>
+                    </div>
+
+                    <div class="insights-filters">
+                      <div class="field-group insights-filter-field">
+                        <label class="field-label" for="insights-min-confidence">Min confidence</label>
+                        <input type="number" id="insights-min-confidence" min="0" max="1" step="0.05" value="0.5" />
+                      </div>
+                      <div class="field-group insights-filter-field insights-filter-wide">
+                        <label class="field-label" for="insights-exclude-types">Exclude relation types (CSV)</label>
+                        <input type="text" id="insights-exclude-types" placeholder="MENTIONED_WITH" value="MENTIONED_WITH" />
+                      </div>
+                    </div>
+
+                    <form id="path-finder-form">
+                      <div class="field-group">
+                        <label class="field-label" for="path-source">Source</label>
+                        <input type="text" id="path-source" placeholder="e.g. Marcus Webb" />
+                      </div>
+                      <div class="field-group">
+                        <label class="field-label" for="path-target">Target</label>
+                        <input type="text" id="path-target" placeholder="e.g. Rania Khalil" />
+                      </div>
+                      <button type="submit" class="btn btn-primary" style="width:100%;">Find shortest paths</button>
+                    </form>
+                    <div id="path-finder-results" class="path-results">
+                      <div class="node-empty">Enter two entities to see the top 3 evidence-weighted paths.</div>
+                    </div>
+
+                    <div class="insights-divider"></div>
+
+                    <div class="insights-subhead">
+                      <div>
+                        <div class="panel-overline">Centrality</div>
+                        <div class="panel-title">Most connected actors</div>
+                      </div>
+                      <div class="insights-actions">
+                        <select id="centrality-metric">
+                          <option value="degree">Degree</option>
+                          <option value="betweenness">Betweenness</option>
+                          <option value="pagerank">PageRank</option>
+                        </select>
+                        <button type="button" id="centrality-refresh" class="btn btn-secondary">Refresh</button>
+                      </div>
+                    </div>
+                    <div id="centrality-results" class="centrality-results">
+                      <div class="node-empty">Loading...</div>
+                    </div>
+
+                    <div class="insights-divider"></div>
+
+                    <div class="insights-subhead">
+                      <div>
+                        <div class="panel-overline">Communities</div>
+                        <div class="panel-title">Louvain clusters</div>
+                      </div>
+                      <div class="insights-actions">
+                        <button type="button" id="community-refresh" class="btn btn-secondary">Refresh</button>
+                      </div>
+                    </div>
+                    <div id="community-results" class="community-results">
+                      <div class="node-empty">Loading...</div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -580,6 +654,7 @@
   <script src="/ui/entity_map.js"></script>
   <script src="/ui/case_map.js"></script>
   <script src="/ui/graph.js"></script>
+  <script src="/ui/graph_insights.js"></script>
   <script src="/ui/timeline.js"></script>
 </body>
 </html>

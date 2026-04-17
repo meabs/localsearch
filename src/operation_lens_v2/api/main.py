@@ -20,6 +20,8 @@ async def lifespan(_: FastAPI):
         duck_store._ensure_case_columns(con)  # noqa: SLF001
         duck_store._ensure_geocode_columns(con)  # noqa: SLF001
         duck_store._ensure_attachments_table(con)  # noqa: SLF001
+        duck_store._ensure_temporal_columns(con)  # noqa: SLF001
+        duck_store._ensure_graph_indexes(con)  # noqa: SLF001
     finally:
         con.close()
     yield

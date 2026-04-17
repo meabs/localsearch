@@ -20,6 +20,7 @@ from operation_lens_v2.query import (
     retriever_vector,
 )
 from operation_lens_v2.runtime import StageTimer, get_duck_connection
+from operation_lens_v2.store import get_graph_backend
 
 logger = logging.getLogger(__name__)
 
@@ -304,74 +305,9 @@ def _inventory_relationships(
     entity_id: str,
     case_id: str | None,
 ) -> list[dict[str, object]]:
-    params: list[object] = [entity_id, entity_id, entity_id]
-    case_filter = ""
-    if case_id:
-        case_filter = "AND d.case_id = ?"
-        params.append(case_id)
-    params.append(12)
-    rows = con.execute(
-        f"""
-        SELECT
-          other.entity_id,
-          other.canonical_name,
-          other.entity_type,
-          r.relation_type,
-          r.confidence,
-          d.doc_id,
-          d.filename,
-          re.page,
-          coalesce(re.span_text, c.text, '')
-        FROM relationships r
-        JOIN entities other
-          ON other.entity_id = CASE
-            WHEN r.source_entity = ? THEN r.target_entity
-            ELSE r.source_entity
-          END
-        LEFT JOIN relationship_evidence re ON re.rel_id = r.rel_id
-        LEFT JOIN documents d ON d.doc_id = re.doc_id
-        LEFT JOIN chunks c ON c.chunk_id = re.chunk_id
-        WHERE (r.source_entity = ? OR r.target_entity = ?)
-        {case_filter}
-        ORDER BY r.confidence DESC, other.canonical_name
-        LIMIT ?
-        """,
-        params,
-    ).fetchall()
-
-    grouped: dict[tuple[str, str], dict[str, object]] = {}
-    for row in rows:
-        key = (str(row[0]), str(row[3]))
-        if key not in grouped:
-            grouped[key] = {
-                "other_entity_id": row[0],
-                "other_name": row[1],
-                "other_type": row[2],
-                "relation_type": row[3],
-                "confidence": float(row[4] or 0.0),
-                "citations": [],
-            }
-        entry = grouped[key]
-        entry["confidence"] = max(entry["confidence"], float(row[4] or 0.0))
-        if row[5] or row[6]:
-            citation = {
-                "doc_id": row[5],
-                "doc_name": row[6] or row[5],
-                "page": row[7] if row[7] is not None else "?",
-                "span_text": row[8] or "",
-            }
-            if citation not in entry["citations"]:
-                entry["citations"].append(citation)
-
-    associations = list(grouped.values())
-    associations.sort(
-        key=lambda item: (
-            0 if str(item.get("other_type", "")).upper() == "PERSON" else 1,
-            -float(item.get("confidence", 0.0)),
-            str(item.get("other_name", "")).lower(),
-        )
+    return get_graph_backend(con).inventory_relationships_for_entity(
+        entity_id, case_id=case_id
     )
-    return associations
 
 
 def _run_relationship_inventory_query(

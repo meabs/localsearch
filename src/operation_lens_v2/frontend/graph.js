@@ -556,6 +556,16 @@
             opacity: 0.12,
           },
         },
+        {
+          selector: ".path-highlight",
+          style: {
+            "border-width": 3,
+            "border-color": "#ffd17d",
+            "background-color": "#f0b840",
+            opacity: 1,
+            "z-index": 99,
+          },
+        },
       ],
       layout: {
         name: "cose",
@@ -622,6 +632,43 @@
     const resolved = data.entities_resolved || [];
     const focusEntity = resolved[0]?.canonical_name || (data.entities || [])[0] || "";
     loadNetwork(focusEntity).catch(() => {});
+  });
+
+  // Phase 8: light up a specific path returned by the path finder. If the
+  // path includes nodes outside the current canvas, we re-seed from the
+  // source entity first so every hop is represented.
+  window.addEventListener("lens:highlight-path", async (event) => {
+    const detail = event.detail || {};
+    const path = detail.path;
+    if (!cy || !path?.nodes?.length) return;
+    const nodeIds = path.nodes.map((n) => n.entity_id);
+    const missing = nodeIds.filter((id) => !cy.getElementById(id).length);
+    if (missing.length) {
+      const firstName = path.nodes[0]?.canonical_name || path.nodes[0]?.entity_id;
+      if (firstName) {
+        await loadNetwork(firstName);
+      }
+    }
+    cy.elements().removeClass("selected edge-selected dimmed path-highlight");
+    const matched = nodeIds
+      .map((id) => cy.getElementById(id))
+      .filter((ele) => ele && ele.length);
+    if (!matched.length) return;
+    matched.forEach((node) => node.addClass("path-highlight"));
+    for (let i = 0; i < nodeIds.length - 1; i += 1) {
+      const a = nodeIds[i];
+      const b = nodeIds[i + 1];
+      cy.edges().forEach((edge) => {
+        const src = edge.data("source");
+        const tgt = edge.data("target");
+        if ((src === a && tgt === b) || (src === b && tgt === a)) {
+          edge.addClass("edge-selected");
+        }
+      });
+    }
+    const hull = cy.collection(matched).union(cy.collection(matched).connectedEdges());
+    cy.elements().not(hull).addClass("dimmed");
+    cy.fit(hull, 80);
   });
 
   loadSchemaColors().finally(() => {

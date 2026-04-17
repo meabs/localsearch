@@ -64,7 +64,10 @@ CREATE TABLE IF NOT EXISTS relationships (
   target_entity TEXT REFERENCES entities(entity_id),
   relation_type TEXT NOT NULL,
   confidence FLOAT NOT NULL,
-  first_evidenced TIMESTAMP DEFAULT now()
+  first_evidenced TIMESTAMP DEFAULT now(),
+  event_time TIMESTAMP,
+  valid_from TIMESTAMP,
+  valid_to TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS relationship_evidence (
@@ -76,7 +79,8 @@ CREATE TABLE IF NOT EXISTS relationship_evidence (
   span_start INTEGER,
   span_end INTEGER,
   span_text TEXT NOT NULL,
-  extraction_method TEXT
+  extraction_method TEXT,
+  event_time TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS queries (
@@ -116,6 +120,8 @@ def init_db(path: str) -> duckdb.DuckDBPyConnection:
     _ensure_case_columns(con)
     _ensure_geocode_columns(con)
     _ensure_attachments_table(con)
+    _ensure_temporal_columns(con)
+    _ensure_graph_indexes(con)
     try:
         con.execute("PRAGMA create_fts_index('chunks', 'chunk_id', 'text');")
     except duckdb.CatalogException:
@@ -144,6 +150,45 @@ def _ensure_geocode_columns(con: duckdb.DuckDBPyConnection) -> None:
             con.execute(ddl)
         except duckdb.CatalogException:
             pass
+
+
+def _ensure_temporal_columns(con: duckdb.DuckDBPyConnection) -> None:
+    # event_time carries a per-edge moment when the supporting evidence places
+    # the interaction in time. Populated lazily — nullable so existing rows
+    # keep working until the Phase 9 temporal extractor backfills.
+    for ddl in (
+        "ALTER TABLE relationships ADD COLUMN event_time TIMESTAMP;",
+        "ALTER TABLE relationships ADD COLUMN valid_from TIMESTAMP;",
+        "ALTER TABLE relationships ADD COLUMN valid_to TIMESTAMP;",
+        "ALTER TABLE relationship_evidence ADD COLUMN event_time TIMESTAMP;",
+    ):
+        try:
+            con.execute(ddl)
+        except duckdb.CatalogException:
+            pass
+
+
+def _ensure_graph_indexes(con: duckdb.DuckDBPyConnection) -> None:
+    # Traversal hot paths hit source_entity/target_entity on every hop. DuckDB
+    # has no separate CREATE INDEX pragma for these in older versions, so wrap
+    # each individually.
+    for ddl in (
+        "CREATE INDEX IF NOT EXISTS rel_source_idx ON relationships(source_entity);",
+        "CREATE INDEX IF NOT EXISTS rel_target_idx ON relationships(target_entity);",
+        "CREATE INDEX IF NOT EXISTS rel_evidence_rel_idx ON relationship_evidence(rel_id);",
+        "CREATE INDEX IF NOT EXISTS entity_aliases_entity_idx ON entity_aliases(entity_id);",
+    ):
+        try:
+            con.execute(ddl)
+        except duckdb.CatalogException:
+            pass
+        except duckdb.ParserException:
+            # Older DuckDB builds reject `IF NOT EXISTS` on indexes.
+            base = ddl.replace("IF NOT EXISTS ", "")
+            try:
+                con.execute(base)
+            except duckdb.CatalogException:
+                pass
 
 
 def _ensure_attachments_table(con: duckdb.DuckDBPyConnection) -> None:
@@ -463,14 +508,17 @@ def create_relationship(
     target_entity: str,
     relation_type: str,
     confidence: float,
+    event_time: object | None = None,
 ) -> str:
     rel_id = str(uuid4())
     con.execute(
         """
-        INSERT INTO relationships (rel_id, source_entity, target_entity, relation_type, confidence)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO relationships (
+          rel_id, source_entity, target_entity, relation_type, confidence, event_time
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        [rel_id, source_entity, target_entity, relation_type, confidence],
+        [rel_id, source_entity, target_entity, relation_type, confidence, event_time],
     )
     return rel_id
 
@@ -483,14 +531,15 @@ def insert_relationship_evidence(
     doc_id: str,
     page: int,
     rel: RelationshipCandidate,
+    event_time: object | None = None,
 ) -> None:
     con.execute(
         """
         INSERT INTO relationship_evidence (
           evidence_id, rel_id, chunk_id, doc_id, page,
-          span_start, span_end, span_text, extraction_method
+          span_start, span_end, span_text, extraction_method, event_time
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             str(uuid4()),
@@ -502,5 +551,6 @@ def insert_relationship_evidence(
             rel.span_end,
             rel.span_text,
             rel.extraction_method,
+            event_time,
         ],
     )
