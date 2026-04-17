@@ -447,6 +447,37 @@ curl -X POST http://127.0.0.1:8000/ingest/file `
   -d '{"pdf_path":"data/pdfs/sample.pdf","case_ref":"OP_TEST"}'
 ```
 
+### Ingest a batch with the helper script
+
+If you already have a folder of PDFs under `data/pdfs`, you can ingest the top-level files in one pass with:
+
+```powershell
+.\.venv\Scripts\python scripts\ingest_cases.py
+```
+
+What the script does:
+
+- sends each `data/pdfs/*.pdf` file to the local API at `http://127.0.0.1:8000/ingest`
+- infers `case_ref` from the filename prefix
+- maps `NF-*` to `OP_NIGHTFALL`
+- maps `OC-*` to `OP_CHESTER`
+- maps `OP_IRONVALE*` to `OP_IRONVALE`
+- maps `OP_SEAGLASS*` to `OP_SEAGLASS`
+- falls back to `UNASSIGNED` if no prefix matches
+
+Notes:
+
+- start the API first with `uvicorn operation_lens_v2.api.main:app --reload`
+- the script only reads PDFs directly under `data/pdfs`; it does not recurse into subfolders
+- to force re-ingestion of files that were already indexed, set `INGEST_FORCE=true` for the command
+
+```powershell
+$env:INGEST_FORCE="true"
+.\.venv\Scripts\python scripts\ingest_cases.py
+```
+
+If you want to generate demo PDFs first, run one of the corpus generators in `scripts/`, then run the ingest script against the resulting files in `data/pdfs`.
+
 ### Ask a question
 
 ```powershell
