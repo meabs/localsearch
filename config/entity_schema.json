@@ -1,0 +1,146 @@
+{
+  "$comment": "Dynamic entity-type registry. Add a type here and the pipeline picks it up — no code changes required.",
+  "entity_types": {
+    "PERSON": {
+      "gliner_prompts": ["person", "people", "person name", "human name", "individual", "suspect", "witness", "officer", "victim", "perpetrator"],
+      "llm_aliases": [],
+      "color": "#3a72c8",
+      "normalise": {
+        "strategy": "person",
+        "strip_titles": ["Mr", "Mrs", "Ms", "Miss", "Dr", "Prof", "DC", "DCI", "DS", "DI", "Sgt", "PC", "Cst", "Det"]
+      }
+    },
+    "ORGANISATION": {
+      "gliner_prompts": ["organisation", "organization", "company", "business", "institution", "agency", "government agency", "corporation", "non-profit"],
+      "llm_aliases": ["ORG", "ORGANIZATION", "COMPANY"],
+      "color": "#7a4ab0",
+      "normalise": {
+        "strategy": "strip_suffix_title",
+        "suffixes": ["Ltd", "Limited", "PLC", "Plc", "plc", "Inc", "Incorporated", "LLP", "LLC", "GmbH", "AG", "SA", "Pty", "Co"]
+      }
+    },
+    "LOCATION": {
+      "gliner_prompts": ["location", "place", "address", "city", "country", "region", "geographic location", "building", "facility", "landmark"],
+      "llm_aliases": ["PLACE", "ADDRESS", "GPE"],
+      "color": "#1a9a8a",
+      "normalise": {
+        "strategy": "title_expand",
+        "expansions": {"\\bRd\\.?\\b": "Road", "\\bSt\\.?\\b": "Street", "\\bAve\\.?\\b": "Avenue", "\\bLn\\.?\\b": "Lane", "\\bBlvd\\.?\\b": "Boulevard", "\\bDr\\.?\\b": "Drive"}
+      },
+      "regex": {
+        "pattern": "\\b\\d{1,4}\\s+[A-Z][A-Za-z'-]+(?:\\s+[A-Z][A-Za-z'-]+){0,3}\\s+(?:Road|Street|Drive|Lane|Avenue|Close|Court|Way|Gardens|Crescent|Place|Park|Boulevard|Terrace|Square|Row|Highway|Freeway)\\b",
+        "group": 0
+      }
+    },
+    "PHONE": {
+      "gliner_prompts": ["phone number", "telephone number", "mobile number", "contact number"],
+      "llm_aliases": ["PHONE_NUMBER", "MOBILE", "TEL"],
+      "color": "#5a8a7a",
+      "normalise": {"strategy": "phone_e164"},
+      "regex": {"pattern": "(?<![\\d])(\\+?\\d[\\d\\s().-]{8,}\\d)(?![\\d])", "group": 1}
+    },
+    "VEHICLE": {
+      "gliner_prompts": ["vehicle registration", "license plate", "number plate", "registration plate", "vehicle identifier"],
+      "llm_aliases": ["LICENCE_PLATE", "LICENSE_PLATE", "REGISTRATION", "PLATE"],
+      "color": "#c96a00",
+      "normalise": {"strategy": "plate"},
+      "regex": {"pattern": "\\b([A-Z]{2}\\s?\\d{2}\\s?[A-Z]{3}|[A-Z]{3}\\s?\\d{3,4}|\\d{3}\\s?[A-Z]{3}|[A-Z]{1,3}\\s?\\d{1,4}\\s?[A-Z]{1,3})\\b", "group": 1, "flags": "i"}
+    },
+    "CASE_REF": {
+      "gliner_prompts": ["case reference", "case number", "file number", "reference number", "investigation id", "incident number"],
+      "llm_aliases": ["CASE", "CASE_NUMBER", "REFERENCE"],
+      "color": "#8899aa",
+      "normalise": {"strategy": "upper_snake"},
+      "regex": {"pattern": "\\b(OP[_\\-\\s][A-Z0-9]+|URN[:\\s]?[A-Z0-9\\-/]+|\\d{2}/[A-Z]{2,4}/\\d+)\\b", "group": 1, "flags": "i"}
+    },
+    "DATE": {
+      "gliner_prompts": ["date", "time", "calendar date", "timestamp"],
+      "llm_aliases": ["TIME", "DATETIME"],
+      "color": "#6b8cae",
+      "normalise": {"strategy": "trim"},
+      "regex": {
+        "pattern": "\\b(\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2}|(?:\\d{1,2}\\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2},?\\s+\\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{4}|\\d{1,2}:\\d{2}(?::\\d{2})?)\\b",
+        "group": 1, "flags": "i"
+      }
+    },
+    "EMAIL": {
+      "gliner_prompts": ["email", "email address", "e-mail"],
+      "llm_aliases": ["EMAIL_ADDRESS"],
+      "color": "#c45c7a",
+      "normalise": {"strategy": "lower"},
+      "regex": {"pattern": "\\b([A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9][A-Za-z0-9.-]*\\.[A-Za-z]{2,})\\b", "group": 1}
+    },
+    "IP_ADDRESS": {
+      "gliner_prompts": ["ip address", "ipv4", "ipv6", "network address"],
+      "llm_aliases": ["IP", "IPV4", "IPV6"],
+      "color": "#2a8f6f",
+      "normalise": {"strategy": "trim"},
+      "regex": {"pattern": "\\b((?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?))\\b", "group": 1}
+    },
+    "WEAPON": {
+      "gliner_prompts": ["weapon", "firearm", "gun", "knife", "blade", "ammunition", "explosive", "bomb", "rifle", "pistol"],
+      "llm_aliases": [],
+      "color": "#b03030",
+      "normalise": {"strategy": "trim"}
+    },
+    "DRUG": {
+      "gliner_prompts": ["drug", "narcotic", "controlled substance", "pill", "tablet"],
+      "llm_aliases": ["SUBSTANCE"],
+      "color": "#8a6a8a",
+      "normalise": {"strategy": "trim"}
+    },
+    "BANK_ACCOUNT": {
+      "gliner_prompts": ["bank account", "credit card", "credit card number", "iban", "sort code", "swift code", "financial account", "payment reference"],
+      "llm_aliases": ["BANK", "ACCOUNT", "IBAN", "CARD"],
+      "color": "#c9a227",
+      "normalise": {"strategy": "upper_compact"},
+      "regex": {
+        "pattern": "\\b(GB\\d{2}[A-Z]{4}\\d{14}|(?:\\d{2}-\\d{2}-\\d{2})\\s+\\d{8}|account(?:\\s+number)?[:\\s]+[A-Z0-9]{8,18}|card(?:\\s+number)?[:\\s]+(?:\\d{4}[\\s-]?){3}\\d{4})\\b",
+        "group": 1, "flags": "i"
+      }
+    },
+    "SERIAL": {
+      "gliner_prompts": ["serial number", "imei", "device serial", "product serial"],
+      "llm_aliases": [],
+      "color": "#9a6a4a",
+      "normalise": {"strategy": "upper_compact"},
+      "regex": {
+        "pattern": "\\b(IMEI[:\\s]*\\d{15}|serial(?:\\s+number)?[:\\s]*[A-Z0-9-]{6,}|device\\s+id[:\\s]*[A-Z0-9-]{6,})\\b",
+        "group": 1, "flags": "i"
+      }
+    }
+  },
+  "relation_hints": ["OBSERVED_AT", "ASSOCIATED_WITH", "LINKED_TO", "MENTIONED_WITH", "INFERRED_LINK"],
+  "relation_patterns": [
+    {
+      "name": "observed_at_generic",
+      "pattern": "(?P<source>[A-Z][\\w.-]+(?:\\s+[A-Z][\\w.'-]+){0,3})\\s+(?:was|were|is|are)\\s+(?:observed|seen|spotted|sighted|photographed|recorded)\\s+(?:at|near|in|outside|inside)\\s+(?P<target>[^.;\\n]{3,80}?)(?=[.;\\n]|\\s+at\\s+\\d{1,2}:\\d{2})",
+      "relation_type": "OBSERVED_AT",
+      "flags": "i"
+    },
+    {
+      "name": "associated_with_generic",
+      "pattern": "(?P<source>[A-Z][\\w.'-]+(?:\\s+[A-Z][\\w.'-]+){0,3})\\s+(?:is|was|are|were)\\s+(?:known\\s+to\\s+)?(?:associate[ds]?|meet(?:s|ing)?|working|collaborat(?:e|ing|es))\\s+(?:with)\\s+(?P<target>[A-Z][\\w.'-]+(?:\\s+[A-Z][\\w.'-]+){0,3})",
+      "relation_type": "ASSOCIATED_WITH",
+      "flags": "i"
+    },
+    {
+      "name": "together_generic",
+      "pattern": "(?P<source>[A-Z][\\w.'-]+(?:\\s+[A-Z][\\w.'-]+){0,3})\\s+(?:and|with)\\s+(?P<target>[A-Z][\\w.'-]+(?:\\s+[A-Z][\\w.'-]+){0,3})\\s+(?:were|are|was|is)\\s+(?:together|seen together|present)",
+      "relation_type": "ASSOCIATED_WITH",
+      "flags": "i"
+    },
+    {
+      "name": "linked_to_generic",
+      "pattern": "(?P<source>[A-Z][\\w.'-]+(?:\\s+[A-Z][\\w.'-]+){0,3})\\s+(?:is|was|are|were)\\s+(?:linked|tied|connected|related)\\s+to\\s+(?P<target>[^.;\\n]{3,80}?)(?=[.;\\n])",
+      "relation_type": "LINKED_TO",
+      "flags": "i"
+    },
+    {
+      "name": "contact_phone_generic",
+      "pattern": "(?P<source>[A-Z][\\w.'-]+(?:\\s+[A-Z][\\w.'-]+){0,3})'s\\s+(?:phone|number|mobile)\\s+\\(?(?P<target>\\+?\\d[\\d\\s().-]{8,}\\d)\\)?\\s+(?:was|is|were)\\s+(?:in\\s+)?contact(?:ing|ed)?\\s+with",
+      "relation_type": "LINKED_TO",
+      "flags": "i"
+    }
+  ]
+}

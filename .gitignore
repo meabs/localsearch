@@ -1,0 +1,22 @@
+.venv/
+.pytest_cache/
+.ruff_cache/
+.tmp_wheels/
+.claude/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+data/*
+!data/.gitkeep
+
+dist/
+build/
+*.whl
+
+config/.env
+
+# Local notes / non-release markdown
+Claude.md
+linkedin.md
