@@ -7,6 +7,8 @@ const evidenceChunks = document.getElementById("evidence-chunks");
 const cloudToggle = document.getElementById("cloud-toggle");
 const templateSelect = document.getElementById("query-template-select");
 const recallModeSelect = document.getElementById("recall-mode-select");
+const queryDomainPackLabel = document.getElementById("query-domain-pack-label");
+const demoQueryButton = document.getElementById("demo-query-btn");
 const chatThread = document.getElementById("query-chat-thread");
 const chatResetButton = document.getElementById("chat-reset-btn");
 const submitButton = form ? form.querySelector("button[type='submit']") : null;
@@ -244,13 +246,17 @@ function focusEvidenceCard(key, snippet) {
   match.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-async function loadQueryTemplates() {
+async function loadQueryTemplates(caseRef = "") {
   if (!templateSelect) return;
   try {
-    const response = await fetch("/query/templates");
+    const suffix = caseRef ? `?case_ref=${encodeURIComponent(caseRef)}` : "";
+    const response = await fetch(`/query/templates${suffix}`);
     if (!response.ok) return;
     const payload = await response.json();
     const templates = Array.isArray(payload.templates) ? payload.templates : [];
+    if (queryDomainPackLabel) {
+      queryDomainPackLabel.value = payload.domain_pack || "base";
+    }
     if (!templates.length) return;
     templateSelect.innerHTML = [
       '<option value="">Choose saved template (optional)</option>',
@@ -273,6 +279,15 @@ if (templateSelect && input) {
     input.value = selected;
     input.focus();
     input.setSelectionRange(input.value.length, input.value.length);
+  });
+}
+
+if (demoQueryButton && input) {
+  demoQueryButton.addEventListener("click", () => {
+    const query =
+      "What connects Lena Hart to South Quay Locker and what evidence supports that connection?";
+    input.value = query;
+    input.focus();
   });
 }
 
@@ -409,3 +424,12 @@ if (form) {
 
 renderChatThread();
 loadQueryTemplates().catch(() => {});
+
+window.addEventListener("lens:case-selected", (event) => {
+  const caseRef = String(event?.detail?.case_ref || "");
+  const domainPack = String(event?.detail?.domain_pack || "base");
+  if (queryDomainPackLabel) {
+    queryDomainPackLabel.value = domainPack;
+  }
+  loadQueryTemplates(caseRef).catch(() => {});
+});

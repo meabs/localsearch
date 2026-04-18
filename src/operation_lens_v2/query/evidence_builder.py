@@ -27,6 +27,8 @@ def build_evidence_packet(
             "page": row.get("page"),
             "span_text": row.get("span_text"),
             "chunk_id": row.get("chunk_id"),
+            "source_label": row.get("source_label"),
+            "provenance_type": row.get("provenance_type"),
         }
         for row in ranked_results
         if row.get("source") == "graph"
@@ -43,6 +45,8 @@ def build_evidence_packet(
             "page": row.get("page"),
             "span_text": row.get("text", ""),
             "chunk_id": row.get("chunk_id"),
+            "source_label": row.get("source_label"),
+            "provenance_type": row.get("provenance_type"),
             "score": row.get("rank_score", row.get("score", 0.0)),
         }
         for row in ranked_results
@@ -55,6 +59,8 @@ def build_evidence_packet(
             "doc_name": row.get("doc_name"),
             "page": row.get("page"),
             "text": row.get("text"),
+            "source_label": row.get("source_label"),
+            "provenance_type": row.get("provenance_type"),
         }
         for row in ranked_results
         if row.get("chunk_id")

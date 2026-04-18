@@ -252,6 +252,20 @@
                   <div class="card-pad">
                     <div class="panel-titlebar">
                       <div>
+                        <div class="panel-overline">Guided demo</div>
+                        <div class="panel-title">Try the synthetic case</div>
+                        <p class="panel-copy">Use the demo case to see aliases, locations, timeline evidence, and grounded citations quickly.</p>
+                      </div>
+                      <div class="panel-chip">10 min</div>
+                    </div>
+                    <button type="button" id="demo-query-btn" class="btn btn-secondary" style="width:100%;">Run demo query</button>
+                  </div>
+                </div>
+
+                <div class="panel-card">
+                  <div class="card-pad">
+                    <div class="panel-titlebar">
+                      <div>
                         <div class="panel-overline">Query setup</div>
                         <div class="panel-title">Build a question</div>
                         <p class="panel-copy">Phrase your prompt the way an analyst would ask for a case briefing or link analysis.</p>
@@ -275,6 +289,11 @@
                       <div class="field-group">
                         <label class="field-label" for="case-input">Case scope</label>
                         <input type="text" id="case-input" placeholder="e.g. OP_NIGHTFALL (optional)" />
+                      </div>
+
+                      <div class="field-group">
+                        <label class="field-label" for="query-domain-pack-label">Domain pack</label>
+                        <input type="text" id="query-domain-pack-label" placeholder="base" readonly />
                       </div>
 
                       <div class="field-group">
@@ -531,6 +550,20 @@
                   <div class="card-pad">
                     <div class="panel-titlebar">
                       <div>
+                        <div class="panel-overline">Guided demo</div>
+                        <div class="panel-title">Demo mode</div>
+                        <p class="panel-copy">Load the synthetic demo from the bootstrap steps, then open it here for a guided walk-through.</p>
+                      </div>
+                      <div class="panel-chip">Synthetic only</div>
+                    </div>
+                    <button type="button" id="open-demo-case-btn" class="btn btn-secondary" style="width:100%;">Open demo case</button>
+                  </div>
+                </div>
+
+                <div class="panel-card">
+                  <div class="card-pad">
+                    <div class="panel-titlebar">
+                      <div>
                         <div class="panel-overline">Case registry</div>
                         <div class="panel-title">Create a case</div>
                         <p class="panel-copy">Add the case reference once, then reuse it for uploads and scoped querying.</p>
@@ -546,6 +579,10 @@
                       <div class="field-group">
                         <label class="field-label" for="case-create-name">Case name</label>
                         <input type="text" id="case-create-name" placeholder="e.g. Operation Nightfall" />
+                      </div>
+                      <div class="field-group">
+                        <label class="field-label" for="case-create-domain-pack">Domain pack</label>
+                        <select id="case-create-domain-pack"></select>
                       </div>
                       <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
                         Create case
@@ -573,13 +610,17 @@
                       </div>
                       <div class="field-group">
                         <label class="field-label" for="case-upload-file">Document</label>
-                        <input type="file" id="case-upload-file" accept="application/pdf,.pdf" />
+                        <input type="file" id="case-upload-file" accept=".pdf,.txt,.csv,.json,.eml,.html,.htm,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff" />
+                      </div>
+                      <div class="field-group">
+                        <label class="field-label" for="case-domain-pack-select">Selected domain pack</label>
+                        <select id="case-domain-pack-select"></select>
                       </div>
                       <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
                         Upload and ingest
                       </button>
                     </form>
-                    <div id="case-upload-status" class="inline-status inline-status-muted">Choose a case and a PDF to begin.</div>
+                    <div id="case-upload-status" class="inline-status inline-status-muted">Choose a case and an evidence file to begin.</div>
                   </div>
                 </div>
               </div>
@@ -596,6 +637,23 @@
                   <div id="case-documents-header">Case documents</div>
                   <div id="case-documents" class="case-documents">
                     <div class="timeline-empty">Select a case to review its uploaded evidence.</div>
+                  </div>
+                </div>
+
+                <div class="panel-card">
+                  <div id="case-dashboard-header">Case dashboard</div>
+                  <div id="case-dashboard" class="case-documents">
+                    <div class="timeline-empty">Select a case to load domain-aware widgets.</div>
+                  </div>
+                </div>
+
+                <div class="panel-card">
+                  <div id="case-dashboard-header">Briefing export</div>
+                  <div class="case-documents">
+                    <button type="button" id="export-md-btn" class="btn btn-secondary">Export Markdown briefing</button>
+                    <button type="button" id="export-html-btn" class="btn btn-secondary">Export HTML briefing</button>
+                    <button type="button" id="export-pdf-btn" class="btn btn-secondary">Export PDF briefing</button>
+                    <div id="case-export-status" class="inline-status inline-status-muted">Select a case to export a briefing.</div>
                   </div>
                 </div>
               </div>

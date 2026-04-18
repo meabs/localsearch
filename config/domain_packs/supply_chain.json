@@ -1,0 +1,28 @@
+{
+  "name": "supply_chain",
+  "extends": "base",
+  "description": "Supply chain and logistics analysis with movement- and vendor-focused defaults.",
+  "ui": {
+    "colors": {
+      "accent": "#c56a22",
+      "surface": "#261911"
+    },
+    "default_dashboard_widgets": [
+      {
+        "widget_id": "movement_watch",
+        "label": "Movement watch",
+        "type": "query_shortcut",
+        "query": "Summarise shipments, locations, and movement-related evidence in this case with citations.",
+        "description": "Open a logistics-focused briefing."
+      }
+    ],
+    "default_query_templates": [
+      {
+        "template_id": "shipment_path",
+        "label": "Shipment path",
+        "query": "Summarise the movement path for {subject} with locations, dates, and citations.",
+        "description": "Trace a shipment, vehicle, or consignment."
+      }
+    ]
+  }
+}

@@ -5,7 +5,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from operation_lens_v2.api.schemas import IngestRequest
 from operation_lens_v2.config import settings
-from operation_lens_v2.ingestion.pipeline import ingest_corpus, ingest_pdf
+from operation_lens_v2.ingestion.parser_registry import registry
+from operation_lens_v2.ingestion.pipeline import ingest_corpus, ingest_document, ingest_pdf
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 UPLOAD_FILE_PARAM = File(...)
@@ -20,11 +21,9 @@ def _sanitise_case_ref(case_ref: str) -> str:
 
 
 def _build_upload_path(case_ref: str, original_name: str) -> Path:
-    filename = Path(original_name or "upload.pdf").name
-    if not filename.lower().endswith(".pdf"):
-        filename = f"{Path(filename).stem or 'upload'}.pdf"
+    filename = Path(original_name or "upload").name
 
-    case_dir = settings.pdf_root_obj / _sanitise_case_ref(case_ref)
+    case_dir = settings.evidence_root_obj / _sanitise_case_ref(case_ref)
     case_dir.mkdir(parents=True, exist_ok=True)
 
     destination = case_dir / filename
@@ -37,12 +36,12 @@ def _build_upload_path(case_ref: str, original_name: str) -> Path:
 
 @router.post("/file")
 async def ingest_file_endpoint(payload: IngestRequest) -> dict[str, object]:
-    """Ingest a single PDF file into the evidence store."""
-    pdf_path = Path(payload.pdf_path)
-    if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail=f"PDF file not found: {payload.pdf_path}")
-    return await ingest_pdf(
-        pdf_path,
+    """Ingest a single evidence file into the evidence store."""
+    evidence_path = Path(payload.pdf_path)
+    if not evidence_path.exists():
+        raise HTTPException(status_code=404, detail=f"Evidence file not found: {payload.pdf_path}")
+    return await ingest_document(
+        evidence_path,
         case_ref=payload.case_ref,
         case_name=payload.case_name,
         force=payload.force,
@@ -51,7 +50,7 @@ async def ingest_file_endpoint(payload: IngestRequest) -> dict[str, object]:
 
 @router.post("/corpus")
 async def ingest_corpus_endpoint(payload: IngestRequest) -> dict[str, object]:
-    """Ingest all PDFs in a directory."""
+    """Ingest all supported evidence files in a directory."""
     corpus_dir = Path(payload.pdf_path)
     if not corpus_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"Directory not found: {payload.pdf_path}")
@@ -83,10 +82,9 @@ async def ingest_upload_endpoint(
         raise HTTPException(status_code=400, detail="case_ref is required")
 
     filename = Path(file.filename or "").name
-    if not filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
-
     destination = _build_upload_path(resolved_case_ref, filename)
+    if registry.get_parser(destination) is None:
+        raise HTTPException(status_code=400, detail="Unsupported evidence format")
     try:
         with destination.open("wb") as buffer:
             while chunk := await file.read(1024 * 1024):
@@ -94,7 +92,7 @@ async def ingest_upload_endpoint(
     finally:
         await file.close()
 
-    result = await ingest_pdf(
+    result = await ingest_document(
         destination,
         case_ref=resolved_case_ref,
         case_name=case_name,

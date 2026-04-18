@@ -18,6 +18,8 @@ class Chunk:
     chunk_index: int
     text: str
     token_count: int
+    source_label: str = ""
+    provenance_type: str = "native_text"
 
 
 @dataclass(slots=True)

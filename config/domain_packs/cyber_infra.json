@@ -1,0 +1,28 @@
+{
+  "name": "cyber_infra",
+  "extends": "base",
+  "description": "Infrastructure and cyber investigations with network identifier defaults.",
+  "ui": {
+    "colors": {
+      "accent": "#2e9fd2",
+      "surface": "#10222c"
+    },
+    "default_dashboard_widgets": [
+      {
+        "widget_id": "host_inventory",
+        "label": "Host inventory",
+        "type": "query_shortcut",
+        "query": "List all IP addresses, host identifiers, and serials linked to this case with citations.",
+        "description": "Highlight infrastructure identifiers in scope."
+      }
+    ],
+    "default_query_templates": [
+      {
+        "template_id": "infra_inventory",
+        "label": "Infrastructure inventory",
+        "query": "List all network and device identifiers linked to this case with citations.",
+        "description": "Gather IP, serial, and infrastructure entities."
+      }
+    ]
+  }
+}

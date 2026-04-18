@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,6 +18,8 @@ CREATE TABLE IF NOT EXISTS cases (
   case_id TEXT PRIMARY KEY,
   case_ref TEXT UNIQUE NOT NULL,
   case_name TEXT NOT NULL,
+  domain_pack TEXT DEFAULT 'base',
+  schema_overrides_json TEXT,
   created_at TIMESTAMP DEFAULT now()
 );
 
@@ -27,6 +30,11 @@ CREATE TABLE IF NOT EXISTS documents (
   filepath TEXT NOT NULL,
   classification TEXT DEFAULT 'OFFICIAL',
   page_count INTEGER,
+  source_type TEXT DEFAULT 'pdf',
+  source_metadata TEXT,
+  parser_name TEXT,
+  content_hash TEXT,
+  perceptual_hash TEXT,
   ingested_at TIMESTAMP DEFAULT now(),
   ocr_used BOOLEAN DEFAULT false
 );
@@ -37,6 +45,8 @@ CREATE TABLE IF NOT EXISTS chunks (
   page INTEGER NOT NULL,
   chunk_index INTEGER NOT NULL,
   text TEXT NOT NULL,
+  source_label TEXT,
+  provenance_type TEXT DEFAULT 'native_text',
   token_count INTEGER,
   ingested_at TIMESTAMP DEFAULT now()
 );
@@ -99,6 +109,39 @@ CREATE TABLE IF NOT EXISTS answer_spans (
   confidence FLOAT,
   validated BOOLEAN
 );
+
+CREATE TABLE IF NOT EXISTS evidence_attachments (
+  attachment_id TEXT PRIMARY KEY,
+  doc_id TEXT REFERENCES documents(doc_id),
+  filename TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size BIGINT NOT NULL,
+  metadata_json TEXT,
+  ingested_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS document_facts (
+  fact_id TEXT PRIMARY KEY,
+  doc_id TEXT REFERENCES documents(doc_id),
+  chunk_id TEXT,
+  fact_type TEXT NOT NULL,
+  fact_value TEXT NOT NULL,
+  provenance_type TEXT NOT NULL,
+  source_label TEXT,
+  confidence FLOAT DEFAULT 1.0,
+  metadata_json TEXT,
+  created_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS document_parser_warnings (
+  warning_id TEXT PRIMARY KEY,
+  doc_id TEXT REFERENCES documents(doc_id),
+  parser_name TEXT NOT NULL,
+  warning_code TEXT NOT NULL,
+  warning_message TEXT NOT NULL,
+  metadata_json TEXT,
+  created_at TIMESTAMP DEFAULT now()
+);
 """
 
 
@@ -118,8 +161,11 @@ def init_db(path: str) -> duckdb.DuckDBPyConnection:
     con = connect(path)
     con.execute(SCHEMA_SQL)
     _ensure_case_columns(con)
+    _ensure_document_columns(con)
+    _ensure_chunk_columns(con)
     _ensure_geocode_columns(con)
     _ensure_attachments_table(con)
+    _ensure_evidence_tables(con)
     _ensure_temporal_columns(con)
     _ensure_graph_indexes(con)
     try:
@@ -132,10 +178,40 @@ def init_db(path: str) -> duckdb.DuckDBPyConnection:
 
 
 def _ensure_case_columns(con: duckdb.DuckDBPyConnection) -> None:
-    try:
-        con.execute("ALTER TABLE documents ADD COLUMN case_id TEXT;")
-    except duckdb.CatalogException:
-        pass
+    for ddl in (
+        "ALTER TABLE documents ADD COLUMN case_id TEXT;",
+        "ALTER TABLE cases ADD COLUMN domain_pack TEXT DEFAULT 'base';",
+        "ALTER TABLE cases ADD COLUMN schema_overrides_json TEXT;",
+    ):
+        try:
+            con.execute(ddl)
+        except duckdb.CatalogException:
+            pass
+
+
+def _ensure_document_columns(con: duckdb.DuckDBPyConnection) -> None:
+    for ddl in (
+        "ALTER TABLE documents ADD COLUMN source_type TEXT DEFAULT 'pdf';",
+        "ALTER TABLE documents ADD COLUMN source_metadata TEXT;",
+        "ALTER TABLE documents ADD COLUMN parser_name TEXT;",
+        "ALTER TABLE documents ADD COLUMN content_hash TEXT;",
+        "ALTER TABLE documents ADD COLUMN perceptual_hash TEXT;",
+    ):
+        try:
+            con.execute(ddl)
+        except duckdb.CatalogException:
+            pass
+
+
+def _ensure_chunk_columns(con: duckdb.DuckDBPyConnection) -> None:
+    for ddl in (
+        "ALTER TABLE chunks ADD COLUMN source_label TEXT;",
+        "ALTER TABLE chunks ADD COLUMN provenance_type TEXT DEFAULT 'native_text';",
+    ):
+        try:
+            con.execute(ddl)
+        except duckdb.CatalogException:
+            pass
 
 
 def _ensure_geocode_columns(con: duckdb.DuckDBPyConnection) -> None:
@@ -203,6 +279,51 @@ def _ensure_attachments_table(con: duckdb.DuckDBPyConnection) -> None:
           caption TEXT,
           storage_path TEXT NOT NULL,
           uploaded_at TIMESTAMP DEFAULT now()
+        );
+        """
+    )
+
+
+def _ensure_evidence_tables(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS evidence_attachments (
+          attachment_id TEXT PRIMARY KEY,
+          doc_id TEXT REFERENCES documents(doc_id),
+          filename TEXT NOT NULL,
+          mime_type TEXT NOT NULL,
+          file_size BIGINT NOT NULL,
+          metadata_json TEXT,
+          ingested_at TIMESTAMP DEFAULT now()
+        );
+        """
+    )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_facts (
+          fact_id TEXT PRIMARY KEY,
+          doc_id TEXT REFERENCES documents(doc_id),
+          chunk_id TEXT,
+          fact_type TEXT NOT NULL,
+          fact_value TEXT NOT NULL,
+          provenance_type TEXT NOT NULL,
+          source_label TEXT,
+          confidence FLOAT DEFAULT 1.0,
+          metadata_json TEXT,
+          created_at TIMESTAMP DEFAULT now()
+        );
+        """
+    )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_parser_warnings (
+          warning_id TEXT PRIMARY KEY,
+          doc_id TEXT REFERENCES documents(doc_id),
+          parser_name TEXT NOT NULL,
+          warning_code TEXT NOT NULL,
+          warning_message TEXT NOT NULL,
+          metadata_json TEXT,
+          created_at TIMESTAMP DEFAULT now()
         );
         """
     )
@@ -334,17 +455,32 @@ def create_case(
     *,
     case_ref: str,
     case_name: str,
+    domain_pack: str = "base",
+    schema_overrides_json: str | None = None,
 ) -> str:
     existing = con.execute(
         "SELECT case_id FROM cases WHERE lower(case_ref)=lower(?)",
         [case_ref],
     ).fetchone()
     if existing:
+        con.execute(
+            """
+            UPDATE cases
+            SET case_name = coalesce(?, case_name),
+                domain_pack = coalesce(?, domain_pack),
+                schema_overrides_json = coalesce(?, schema_overrides_json)
+            WHERE case_id = ?
+            """,
+            [case_name, domain_pack, schema_overrides_json, existing[0]],
+        )
         return existing[0]
     case_id = str(uuid4())
     con.execute(
-        "INSERT INTO cases (case_id, case_ref, case_name) VALUES (?, ?, ?)",
-        [case_id, case_ref, case_name],
+        """
+        INSERT INTO cases (case_id, case_ref, case_name, domain_pack, schema_overrides_json)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [case_id, case_ref, case_name, domain_pack, schema_overrides_json],
     )
     return case_id
 
@@ -352,15 +488,21 @@ def create_case(
 def list_cases(con: duckdb.DuckDBPyConnection) -> list[dict[str, str]]:
     rows = con.execute(
         """
-        SELECT c.case_id, c.case_ref, c.case_name, count(d.doc_id) as doc_count
+        SELECT c.case_id, c.case_ref, c.case_name, c.domain_pack, count(d.doc_id) as doc_count
         FROM cases c
         LEFT JOIN documents d ON d.case_id = c.case_id
-        GROUP BY c.case_id, c.case_ref, c.case_name
+        GROUP BY c.case_id, c.case_ref, c.case_name, c.domain_pack
         ORDER BY c.case_ref
         """
     ).fetchall()
     return [
-        {"case_id": row[0], "case_ref": row[1], "case_name": row[2], "doc_count": str(row[3])}
+        {
+            "case_id": row[0],
+            "case_ref": row[1],
+            "case_name": row[2],
+            "domain_pack": row[3] or "base",
+            "doc_count": str(row[4]),
+        }
         for row in rows
     ]
 
@@ -377,6 +519,7 @@ def list_case_documents(
           d.filename,
           d.filepath,
           coalesce(d.page_count, 0) AS page_count,
+          coalesce(d.source_type, 'pdf') AS source_type,
           d.ingested_at
         FROM documents d
         JOIN cases c ON c.case_id = d.case_id
@@ -391,7 +534,8 @@ def list_case_documents(
             "filename": row[1],
             "filepath": row[2],
             "page_count": str(row[3]),
-            "ingested_at": str(row[4]),
+            "source_type": row[4],
+            "ingested_at": str(row[5]),
         }
         for row in rows
     ]
@@ -405,9 +549,86 @@ def get_case_id_by_ref(con: duckdb.DuckDBPyConnection, case_ref: str) -> str | N
     return row[0] if row else None
 
 
+def get_case_by_ref(con: duckdb.DuckDBPyConnection, case_ref: str) -> dict[str, object] | None:
+    row = con.execute(
+        """
+        SELECT case_id, case_ref, case_name, coalesce(domain_pack, 'base'), schema_overrides_json
+        FROM cases
+        WHERE lower(case_ref)=lower(?)
+        """,
+        [case_ref],
+    ).fetchone()
+    if not row:
+        return None
+    overrides = None
+    if row[4]:
+        try:
+            overrides = json.loads(row[4])
+        except json.JSONDecodeError:
+            overrides = None
+    return {
+        "case_id": row[0],
+        "case_ref": row[1],
+        "case_name": row[2],
+        "domain_pack": row[3] or "base",
+        "schema_overrides": overrides,
+    }
+
+
+def set_case_domain_pack(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    case_ref: str,
+    domain_pack: str,
+    schema_overrides: dict[str, object] | None = None,
+) -> dict[str, object] | None:
+    schema_overrides_json = json.dumps(schema_overrides) if schema_overrides else None
+    con.execute(
+        """
+        UPDATE cases
+        SET domain_pack = ?, schema_overrides_json = ?
+        WHERE lower(case_ref)=lower(?)
+        """,
+        [domain_pack, schema_overrides_json, case_ref],
+    )
+    return get_case_by_ref(con, case_ref)
+
+
 def get_doc_ids_for_case(con: duckdb.DuckDBPyConnection, case_id: str) -> set[str]:
     rows = con.execute("SELECT doc_id FROM documents WHERE case_id = ?", [case_id]).fetchall()
     return {row[0] for row in rows}
+
+
+def find_document_by_fingerprint(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    case_id: str,
+    content_hash: str | None = None,
+    perceptual_hash: str | None = None,
+) -> str | None:
+    if content_hash:
+        row = con.execute(
+            """
+            SELECT doc_id
+            FROM documents
+            WHERE case_id = ? AND content_hash = ?
+            """,
+            [case_id, content_hash],
+        ).fetchone()
+        if row:
+            return row[0]
+    if perceptual_hash:
+        row = con.execute(
+            """
+            SELECT doc_id
+            FROM documents
+            WHERE case_id = ? AND perceptual_hash = ?
+            """,
+            [case_id, perceptual_hash],
+        ).fetchone()
+        if row:
+            return row[0]
+    return None
 
 
 def db_health(con: duckdb.DuckDBPyConnection) -> dict[str, str]:
@@ -427,13 +648,33 @@ def upsert_document(
     page_count: int,
     ocr_used: bool,
     case_id: str | None = None,
+    source_type: str = "pdf",
+    source_metadata: dict[str, object] | None = None,
+    parser_name: str | None = None,
+    content_hash: str | None = None,
+    perceptual_hash: str | None = None,
 ) -> None:
     con.execute(
         """
-        INSERT OR REPLACE INTO documents (doc_id, case_id, filename, filepath, page_count, ocr_used)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO documents (
+          doc_id, case_id, filename, filepath, page_count, ocr_used,
+          source_type, source_metadata, parser_name, content_hash, perceptual_hash
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [doc_id, case_id, filename, filepath, page_count, ocr_used],
+        [
+            doc_id,
+            case_id,
+            filename,
+            filepath,
+            page_count,
+            ocr_used,
+            source_type,
+            json.dumps(source_metadata or {}),
+            parser_name,
+            content_hash,
+            perceptual_hash,
+        ],
     )
 
 
@@ -441,8 +682,10 @@ def insert_chunks(con: duckdb.DuckDBPyConnection, chunks: list[Chunk]) -> None:
     for chunk in chunks:
         con.execute(
             """
-            INSERT OR REPLACE INTO chunks (chunk_id, doc_id, page, chunk_index, text, token_count)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO chunks (
+              chunk_id, doc_id, page, chunk_index, text, source_label, provenance_type, token_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 chunk.chunk_id,
@@ -450,6 +693,8 @@ def insert_chunks(con: duckdb.DuckDBPyConnection, chunks: list[Chunk]) -> None:
                 chunk.page,
                 chunk.chunk_index,
                 chunk.text,
+                chunk.source_label,
+                chunk.provenance_type,
                 chunk.token_count,
             ],
         )
@@ -554,3 +799,83 @@ def insert_relationship_evidence(
             event_time,
         ],
     )
+
+
+def insert_evidence_attachments(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    doc_id: str,
+    attachments: list[dict[str, object]],
+) -> None:
+    for attachment in attachments:
+        con.execute(
+            """
+            INSERT INTO evidence_attachments (
+              attachment_id, doc_id, filename, mime_type, file_size, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                str(uuid4()),
+                doc_id,
+                attachment.get("filename", "attachment"),
+                attachment.get("mime_type", "application/octet-stream"),
+                int(attachment.get("file_size", 0) or 0),
+                json.dumps(attachment.get("metadata", {}) or {}),
+            ],
+        )
+
+
+def insert_document_facts(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    doc_id: str,
+    facts: list[dict[str, object]],
+) -> None:
+    for fact in facts:
+        con.execute(
+            """
+            INSERT INTO document_facts (
+              fact_id, doc_id, chunk_id, fact_type, fact_value, provenance_type,
+              source_label, confidence, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                str(uuid4()),
+                doc_id,
+                fact.get("chunk_id"),
+                fact.get("fact_type", ""),
+                fact.get("fact_value", ""),
+                fact.get("provenance_type", "native_text"),
+                fact.get("source_label"),
+                float(fact.get("confidence", 1.0) or 1.0),
+                json.dumps(fact.get("metadata", {}) or {}),
+            ],
+        )
+
+
+def insert_parser_warnings(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    doc_id: str,
+    parser_name: str,
+    warnings: list[dict[str, object]],
+) -> None:
+    for warning in warnings:
+        con.execute(
+            """
+            INSERT INTO document_parser_warnings (
+              warning_id, doc_id, parser_name, warning_code, warning_message, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                str(uuid4()),
+                doc_id,
+                parser_name,
+                warning.get("warning_code", "warning"),
+                warning.get("message", ""),
+                json.dumps(warning.get("metadata", {}) or {}),
+            ],
+        )

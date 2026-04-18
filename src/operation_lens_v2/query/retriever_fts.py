@@ -13,7 +13,7 @@ def retrieve_fts(
         if case_id:
             rows = con.execute(
                 """
-                SELECT c.chunk_id, c.doc_id, c.page, c.text,
+                SELECT c.chunk_id, c.doc_id, c.page, c.text, c.source_label, c.provenance_type,
                        fts_main_chunks.match_bm25(c.chunk_id, ?) AS score
                 FROM chunks c
                 JOIN documents d ON d.doc_id = c.doc_id
@@ -27,7 +27,7 @@ def retrieve_fts(
         else:
             rows = con.execute(
                 """
-                SELECT c.chunk_id, c.doc_id, c.page, c.text,
+                SELECT c.chunk_id, c.doc_id, c.page, c.text, c.source_label, c.provenance_type,
                        fts_main_chunks.match_bm25(c.chunk_id, ?) AS score
                 FROM chunks c
                 JOIN fts_main_chunks ON c.chunk_id = fts_main_chunks.chunk_id
@@ -47,7 +47,9 @@ def retrieve_fts(
             "doc_id": r[1],
             "page": r[2],
             "text": r[3],
-            "score": float(r[4]) if r[4] is not None else 0.0,
+            "source_label": r[4],
+            "provenance_type": r[5],
+            "score": float(r[6]) if r[6] is not None else 0.0,
         }
         for r in rows
     ]

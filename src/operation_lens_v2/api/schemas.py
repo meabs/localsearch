@@ -19,3 +19,9 @@ class QueryRequest(BaseModel):
 class CreateCaseRequest(BaseModel):
     case_ref: str
     case_name: str
+    domain_pack: str = "base"
+
+
+class CaseDomainPackRequest(BaseModel):
+    domain_pack: str
+    schema_overrides: dict[str, object] | None = None

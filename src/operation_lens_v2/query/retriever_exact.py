@@ -29,7 +29,9 @@ def retrieve_exact(
               d.filename,
               c.page,
               c.text,
-              ea.source_chunk
+              ea.source_chunk,
+              c.source_label,
+              c.provenance_type
             FROM entity_aliases ea
             JOIN entities e ON e.entity_id = ea.entity_id
             LEFT JOIN documents d ON d.doc_id = ea.source_doc
@@ -52,7 +54,9 @@ def retrieve_exact(
               d.filename,
               c.page,
               c.text,
-              ea.source_chunk
+              ea.source_chunk,
+              c.source_label,
+              c.provenance_type
             FROM entity_aliases ea
             JOIN entities e ON e.entity_id = ea.entity_id
             LEFT JOIN documents d ON d.doc_id = ea.source_doc
@@ -75,6 +79,8 @@ def retrieve_exact(
             "page": r[7],
             "text": r[8] or "",
             "chunk_id": r[9],
+            "source_label": r[10],
+            "provenance_type": r[11],
             "score": 1.0,
         }
         for r in rows

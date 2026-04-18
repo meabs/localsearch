@@ -37,6 +37,8 @@ async def retrieve_vector(query: str, limit: int | None = None) -> list[dict[str
             "doc_id": row.get("doc_id"),
             "page": row.get("page"),
             "text": row.get("text", ""),
+            "source_label": row.get("source_label"),
+            "provenance_type": row.get("provenance_type"),
             "score": _distance_to_similarity(float(row.get("_distance", 0.0))),
             "distance": float(row.get("_distance", 0.0)),
         }

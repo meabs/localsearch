@@ -1,0 +1,57 @@
+{
+  "name": "investigations",
+  "extends": "base",
+  "description": "General investigations with chronology- and association-focused defaults.",
+  "entity_types": {
+    "ALIAS": {
+      "gliner_prompts": ["alias", "nickname", "street name", "moniker"],
+      "llm_aliases": ["NICKNAME"],
+      "color": "#d39a2a",
+      "normalise": {
+        "strategy": "trim"
+      }
+    }
+  },
+  "relation_hints": ["CO_TRAVELLED_WITH", "USED_ALIAS"],
+  "ui": {
+    "colors": {
+      "accent": "#d39a2a",
+      "surface": "#13222b"
+    },
+    "default_dashboard_widgets": [
+      {
+        "widget_id": "recent_ingest",
+        "label": "Recent evidence",
+        "type": "document_count",
+        "description": "Track how much evidence is currently attached to the case."
+      },
+      {
+        "widget_id": "timeline_focus",
+        "label": "Chronology focus",
+        "type": "query_shortcut",
+        "query": "Summarise the dated sequence of events for this case with citations.",
+        "description": "Launch a chronology briefing tailored to investigative reconstruction."
+      }
+    ],
+    "default_query_templates": [
+      {
+        "template_id": "assoc_brief",
+        "label": "Associate briefing",
+        "query": "Who are the known associates of {subject}? Include evidence citations.",
+        "description": "Map direct links around one named entity."
+      },
+      {
+        "template_id": "alias_usage",
+        "label": "Alias usage",
+        "query": "List every alias or nickname linked to {subject} and where each alias appears.",
+        "description": "Trace alternate names and their supporting documents."
+      },
+      {
+        "template_id": "timeline_rebuild",
+        "label": "Timeline rebuild",
+        "query": "Reconstruct the key dated events for {subject} in chronological order with citations.",
+        "description": "Create an investigative sequence grounded in source text."
+      }
+    ]
+  }
+}

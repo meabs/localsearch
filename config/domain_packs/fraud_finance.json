@@ -1,0 +1,67 @@
+{
+  "name": "fraud_finance",
+  "extends": "base",
+  "description": "Finance and fraud analysis with payment, merchant, and account-centric defaults.",
+  "entity_types": {
+    "CRYPTO_WALLET": {
+      "gliner_prompts": ["crypto wallet", "wallet address", "blockchain address"],
+      "llm_aliases": ["WALLET"],
+      "color": "#00a56a",
+      "normalise": {
+        "strategy": "upper_compact"
+      }
+    },
+    "MERCHANT": {
+      "gliner_prompts": ["merchant", "vendor", "payee", "trader"],
+      "llm_aliases": ["PAYEE", "VENDOR"],
+      "color": "#3b7dd8",
+      "normalise": {
+        "strategy": "strip_suffix_title",
+        "suffixes": ["Ltd", "Limited", "LLC", "Inc"]
+      }
+    }
+  },
+  "relation_hints": ["TRANSFERRED_TO", "CONTROLLED_BY", "PURCHASED_FROM"],
+  "ui": {
+    "colors": {
+      "accent": "#00a56a",
+      "surface": "#11251f"
+    },
+    "default_dashboard_widgets": [
+      {
+        "widget_id": "account_inventory",
+        "label": "Account inventory",
+        "type": "query_shortcut",
+        "query": "List all bank accounts, cards, and payment identifiers linked to this case with citations.",
+        "description": "Surface the current finance identifier inventory."
+      },
+      {
+        "widget_id": "money_flow",
+        "label": "Money flow",
+        "type": "query_shortcut",
+        "query": "Summarise possible payment flows and counterparties in this case with evidence citations.",
+        "description": "Launch a financial linkage summary."
+      }
+    ],
+    "default_query_templates": [
+      {
+        "template_id": "payments_inventory",
+        "label": "Payment inventory",
+        "query": "List all payment instruments and bank identifiers linked to this case.",
+        "description": "Inventory cards, IBANs, sort codes, and bank references."
+      },
+      {
+        "template_id": "merchant_links",
+        "label": "Merchant links",
+        "query": "Which merchants or payees are linked to {subject}, and what evidence supports each link?",
+        "description": "Map the merchant network around a subject."
+      },
+      {
+        "template_id": "transfer_summary",
+        "label": "Transfer summary",
+        "query": "Summarise likely transfers, payments, or account links involving {subject} with citations.",
+        "description": "Trace movement of funds or identifiers."
+      }
+    ]
+  }
+}

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     duckdb_path: str = Field(default="data/evidence.duckdb", alias="DUCKDB_PATH")
     lancedb_path: str = Field(default="data/lancedb", alias="LANCEDB_PATH")
     pdf_root: str = Field(default="data/pdfs", alias="PDF_ROOT")
+    evidence_root: str = Field(default="data/pdfs", alias="EVIDENCE_ROOT")
+    export_root: str = Field(default="data/exports", alias="EXPORT_ROOT")
 
     # ── Ollama ────────────────────────────────────────────────────────────────
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
@@ -94,6 +96,14 @@ class Settings(BaseSettings):
     @property
     def pdf_root_obj(self) -> Path:
         return Path(self.pdf_root)
+
+    @property
+    def evidence_root_obj(self) -> Path:
+        return Path(self.evidence_root)
+
+    @property
+    def export_root_obj(self) -> Path:
+        return Path(self.export_root)
 
 
 settings = Settings()
