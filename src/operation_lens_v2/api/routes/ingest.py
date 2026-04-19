@@ -21,7 +21,8 @@ def _sanitise_case_ref(case_ref: str) -> str:
 
 def _build_upload_path(case_ref: str, original_name: str) -> Path:
     filename = Path(original_name or "upload.pdf").name
-    if not filename.lower().endswith(".pdf"):
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".pdf", ".csv"}:
         filename = f"{Path(filename).stem or 'upload'}.pdf"
 
     case_dir = settings.pdf_root_obj / _sanitise_case_ref(case_ref)
@@ -37,10 +38,10 @@ def _build_upload_path(case_ref: str, original_name: str) -> Path:
 
 @router.post("/file")
 async def ingest_file_endpoint(payload: IngestRequest) -> dict[str, object]:
-    """Ingest a single PDF file into the evidence store."""
+    """Ingest a single supported evidence file into the evidence store."""
     pdf_path = Path(payload.pdf_path)
     if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail=f"PDF file not found: {payload.pdf_path}")
+        raise HTTPException(status_code=404, detail=f"File not found: {payload.pdf_path}")
     return await ingest_pdf(
         pdf_path,
         case_ref=payload.case_ref,
@@ -51,7 +52,7 @@ async def ingest_file_endpoint(payload: IngestRequest) -> dict[str, object]:
 
 @router.post("/corpus")
 async def ingest_corpus_endpoint(payload: IngestRequest) -> dict[str, object]:
-    """Ingest all PDFs in a directory."""
+    """Ingest all supported evidence files in a directory."""
     corpus_dir = Path(payload.pdf_path)
     if not corpus_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"Directory not found: {payload.pdf_path}")
@@ -77,14 +78,14 @@ async def ingest_upload_endpoint(
     case_name: str | None = CASE_NAME_FORM,
     force: bool = FORCE_FORM,
 ) -> dict[str, object]:
-    """Accept a PDF upload directly from the browser and ingest it."""
+    """Accept a PDF or CSV upload directly from the browser and ingest it."""
     resolved_case_ref = case_ref.strip()
     if not resolved_case_ref:
         raise HTTPException(status_code=400, detail="case_ref is required")
 
     filename = Path(file.filename or "").name
-    if not filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
+    if Path(filename).suffix.lower() not in {".pdf", ".csv"}:
+        raise HTTPException(status_code=400, detail="Only PDF and CSV uploads are supported")
 
     destination = _build_upload_path(resolved_case_ref, filename)
     try:

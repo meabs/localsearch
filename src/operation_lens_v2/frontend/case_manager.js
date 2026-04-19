@@ -217,7 +217,7 @@ if (caseUploadForm) {
       return;
     }
     if (!file) {
-      setInlineStatus(caseUploadStatus, "error", "Select a PDF document to upload.");
+      setInlineStatus(caseUploadStatus, "error", "Select a PDF or CSV document to upload.");
       return;
     }
 

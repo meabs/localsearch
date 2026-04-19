@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   chunk_index INTEGER NOT NULL,
   text TEXT NOT NULL,
   token_count INTEGER,
+  source_kind TEXT DEFAULT 'pdf',
   ingested_at TIMESTAMP DEFAULT now()
 );
 
@@ -118,6 +119,7 @@ def init_db(path: str) -> duckdb.DuckDBPyConnection:
     con = connect(path)
     con.execute(SCHEMA_SQL)
     _ensure_case_columns(con)
+    _ensure_chunk_columns(con)
     _ensure_geocode_columns(con)
     _ensure_attachments_table(con)
     _ensure_temporal_columns(con)
@@ -134,6 +136,17 @@ def init_db(path: str) -> duckdb.DuckDBPyConnection:
 def _ensure_case_columns(con: duckdb.DuckDBPyConnection) -> None:
     try:
         con.execute("ALTER TABLE documents ADD COLUMN case_id TEXT;")
+    except duckdb.CatalogException:
+        pass
+
+
+def _ensure_chunk_columns(con: duckdb.DuckDBPyConnection) -> None:
+    try:
+        con.execute("ALTER TABLE chunks ADD COLUMN source_kind TEXT DEFAULT 'pdf';")
+    except duckdb.CatalogException:
+        pass
+    try:
+        con.execute("UPDATE chunks SET source_kind = 'pdf' WHERE source_kind IS NULL;")
     except duckdb.CatalogException:
         pass
 
@@ -441,8 +454,10 @@ def insert_chunks(con: duckdb.DuckDBPyConnection, chunks: list[Chunk]) -> None:
     for chunk in chunks:
         con.execute(
             """
-            INSERT OR REPLACE INTO chunks (chunk_id, doc_id, page, chunk_index, text, token_count)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO chunks (
+              chunk_id, doc_id, page, chunk_index, text, token_count, source_kind
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 chunk.chunk_id,
@@ -451,6 +466,7 @@ def insert_chunks(con: duckdb.DuckDBPyConnection, chunks: list[Chunk]) -> None:
                 chunk.chunk_index,
                 chunk.text,
                 chunk.token_count,
+                chunk.source_kind,
             ],
         )
 

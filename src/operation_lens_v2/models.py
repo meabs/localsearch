@@ -11,6 +11,12 @@ ClaimStatus = Literal["SUPPORTED", "PARTIALLY_SUPPORTED", "UNSUPPORTED"]
 
 
 @dataclass(slots=True)
+class PageRecord:
+    page: int
+    text: str
+
+
+@dataclass(slots=True)
 class Chunk:
     chunk_id: str
     doc_id: str
@@ -18,6 +24,7 @@ class Chunk:
     chunk_index: int
     text: str
     token_count: int
+    source_kind: str = "pdf"
 
 
 @dataclass(slots=True)

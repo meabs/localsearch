@@ -505,7 +505,7 @@
                 <div class="workspace-kicker">Section 04</div>
                 <h1 class="section-title">Case Intake Desk</h1>
                 <p class="section-desc">
-                  Create a case record, upload PDF evidence directly from the browser, and keep a visible register of what has
+                    Create a case record, upload PDF or CSV evidence directly from the browser, and keep a visible register of what has
                   been attached to each case.
                 </p>
               </div>
@@ -520,7 +520,7 @@
                 </div>
                 <div class="metric-card">
                   <div class="metric-label">Evidence</div>
-                  <div class="metric-value">PDF</div>
+                      <div class="metric-value">PDF + CSV</div>
                 </div>
               </div>
             </div>
@@ -561,9 +561,9 @@
                       <div>
                         <div class="panel-overline">Evidence intake</div>
                         <div class="panel-title">Upload case documents</div>
-                        <p class="panel-copy">Choose a case, select one PDF, and the system will store and ingest it locally.</p>
+                      <p class="panel-copy">Choose a case, select one PDF or CSV file, and the system will store and ingest it locally.</p>
                       </div>
-                      <div class="panel-chip">PDF only</div>
+                        <div class="panel-chip">PDF or CSV</div>
                     </div>
 
                     <form id="case-upload-form">
@@ -573,13 +573,13 @@
                       </div>
                       <div class="field-group">
                         <label class="field-label" for="case-upload-file">Document</label>
-                        <input type="file" id="case-upload-file" accept="application/pdf,.pdf" />
+                        <input type="file" id="case-upload-file" accept="application/pdf,text/csv,.pdf,.csv" />
                       </div>
                       <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
                         Upload and ingest
                       </button>
                     </form>
-                    <div id="case-upload-status" class="inline-status inline-status-muted">Choose a case and a PDF to begin.</div>
+                      <div id="case-upload-status" class="inline-status inline-status-muted">Choose a case and a PDF or CSV file to begin.</div>
                   </div>
                 </div>
               </div>

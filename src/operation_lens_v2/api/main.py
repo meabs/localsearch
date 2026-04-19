@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from operation_lens_v2.api.routes import audit, cases, graph, ingest, query, timeline
+from operation_lens_v2.api.routes import audit, cases, entities, graph, ingest, query, timeline
 from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion import duck_store
 from operation_lens_v2.logging_utils import setup_logging
@@ -34,6 +34,7 @@ app.include_router(query.router)
 app.include_router(graph.router)
 app.include_router(audit.router)
 app.include_router(cases.router)
+app.include_router(entities.router)
 app.include_router(timeline.router)
 app.mount(
     "/ui",

@@ -6,6 +6,11 @@ import re
 from typing import Any
 
 from operation_lens_v2.config import settings
+from operation_lens_v2.query.prompts import (
+    DOCUMENT_SUMMARY_SYSTEM_PROMPT,
+    FREEFORM_SYSTEM_PROMPT,
+    RELATIONSHIP_SYSTEM_PROMPT,
+)
 from operation_lens_v2.runtime import get_http_client
 
 logger = logging.getLogger(__name__)
@@ -430,12 +435,7 @@ async def _local_document_analysis(
             json={
                 "model": settings.local_reasoning_model,
                 "prompt": (
-                    "You are an intelligence analyst preparing a succinct document briefing.\n"
-                    "Return plain text only.\n"
-                    "Use exact sections: KEY FINDINGS, CONFIDENCE POSTURE, EVIDENCE GAPS.\n"
-                    "In KEY FINDINGS, provide 3 to 6 bullet points.\n"
-                    "Each bullet must include exactly one citation in the form [DOC_ID, p.N].\n"
-                    "Do not repeat the document title or classification banner as a finding.\n\n"
+                    f"{DOCUMENT_SUMMARY_SYSTEM_PROMPT}\n\n"
                     f"{json.dumps(prompt_obj)}"
                 ),
                 "stream": False,
@@ -449,6 +449,78 @@ async def _local_document_analysis(
         return str(payload.get("response", "")).strip() or None
     except Exception as exc:
         logger.warning("Local document analysis failed: %s", exc)
+        return None
+
+
+async def _local_freeform_analysis(
+    evidence_packet: dict[str, Any],
+    chunks: list[dict[str, Any]],
+    exact_matches: list[dict[str, Any]],
+) -> str | None:
+    excerpts: list[dict[str, Any]] = []
+    for chunk in chunks[:DOCUMENT_ANALYSIS_CHUNK_LIMIT]:
+        cleaned_text = _clean_document_text(chunk.get("text"))
+        if not cleaned_text:
+            continue
+        excerpts.append(
+            {
+                "doc_id": chunk.get("doc_name") or chunk.get("doc_id") or UNKNOWN_DOC,
+                "page": chunk.get("page") or "?",
+                "text": cleaned_text[:DOCUMENT_ANALYSIS_TEXT_LIMIT],
+            }
+        )
+    if not excerpts:
+        return None
+
+    known_entities: list[dict[str, Any]] = []
+    for item in exact_matches:
+        citations = []
+        for citation in item.get("citations", []):
+            citations.append(
+                {
+                    "doc_id": citation.get("doc_id") or citation.get("doc_name") or UNKNOWN_DOC,
+                    "page": citation.get("page") or "?",
+                }
+            )
+        known_entities.append(
+            {
+                "canonical_name": item.get("canonical_name") or item.get("alias_text") or "Unknown",
+                "entity_type": item.get("entity_type") or "UNKNOWN",
+                "citations": citations,
+            }
+        )
+
+    prompt_obj = {
+        "task": "Analyse freeform evidence into an operational briefing",
+        "query": evidence_packet.get("query_text"),
+        "case_scope": evidence_packet.get("case_scope", "ALL_CASES"),
+        "known_entities": known_entities,
+        "instructions": [
+            "Use only the supplied evidence excerpts and known entities.",
+            "Return plain text only.",
+            "Produce a narrative operational briefing with concise findings.",
+        ],
+        "excerpts": excerpts,
+    }
+    try:
+        client = get_http_client(base_url=settings.ollama_base_url, timeout=settings.ollama_timeout)
+        response = await client.post(
+            "/api/generate",
+            json={
+                "model": settings.local_reasoning_model,
+                "prompt": (
+                    f"{FREEFORM_SYSTEM_PROMPT}\n\n"
+                    f"{json.dumps(prompt_obj)}"
+                ),
+                "stream": False,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        text = str(payload.get("response", "")).strip()
+        return text if text else None
+    except Exception as exc:
+        logger.warning("Local freeform analysis failed: %s", exc)
         return None
 
 
@@ -490,9 +562,7 @@ async def _local_ollama_analysis(
             json={
                 "model": settings.local_reasoning_model,
                 "prompt": (
-                    "You are an intelligence analyst. Return plain text only.\n"
-                    "Use sections: Key Findings, Confidence Posture, Evidence Gaps.\n"
-                    "Cite every claim as [DOC_ID, p.N].\n\n"
+                    f"{RELATIONSHIP_SYSTEM_PROMPT}\n\n"
                     f"{json.dumps(prompt_obj)}"
                 ),
                 "stream": False,
@@ -610,6 +680,16 @@ async def generate_answer(
         return {"backend": backend_used, "answer": answer, "claims": claims}
 
     if not relationships:
+        local_freeform_analysis = await _local_freeform_analysis(
+            evidence_packet, chunks, exact_matches
+        )
+        if local_freeform_analysis:
+            return {
+                "backend": settings.local_reasoning_model,
+                "answer": local_freeform_analysis,
+                "claims": [],
+            }
+
         exact_findings = _aggregate_exact_matches(exact_matches)
         if not exact_findings:
             if chunks:

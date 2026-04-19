@@ -1509,6 +1509,137 @@ input[type="file"]::-webkit-file-upload-button {
   line-height: 1.7;
 }
 
+.timeline-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.timeline-chart-shell {
+  padding: 18px 20px 20px;
+  border: 1px solid var(--border-0);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(241, 167, 63, 0.05), rgba(255, 255, 255, 0.015)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.timeline-chart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.timeline-chart-kicker {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.timeline-chart-title {
+  margin-top: 4px;
+  color: var(--amber-100);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.timeline-chart-copy {
+  margin-top: 6px;
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.timeline-chart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.timeline-mode-btn {
+  min-width: 68px;
+}
+
+.timeline-mode-btn.active {
+  background: var(--amber-glow);
+  border-color: rgba(241, 167, 63, 0.56);
+  color: #0b1118;
+}
+
+.timeline-chart-summary {
+  margin-bottom: 12px;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.timeline-chart-viewport {
+  overflow: auto;
+  max-height: 360px;
+}
+
+.timeline-chart-svg {
+  display: block;
+  min-width: 100%;
+}
+
+.timeline-chart-row {
+  cursor: pointer;
+}
+
+.timeline-chart-row:focus {
+  outline: none;
+}
+
+.timeline-chart-row:focus .timeline-chart-track,
+.timeline-chart-row:hover .timeline-chart-track {
+  stroke: rgba(241, 167, 63, 0.4);
+}
+
+.timeline-chart-row:focus .timeline-chart-fill,
+.timeline-chart-row:hover .timeline-chart-fill {
+  opacity: 0.96;
+}
+
+.timeline-chart-label {
+  fill: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.timeline-chart-count {
+  fill: var(--amber-100);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.timeline-chart-track {
+  fill: rgba(255, 255, 255, 0.04);
+  stroke: rgba(255, 255, 255, 0.05);
+}
+
+.timeline-chart-fill {
+  fill: rgba(241, 167, 63, 0.72);
+}
+
+.timeline-chart-fill.active {
+  fill: rgba(241, 167, 63, 0.98);
+}
+
+.timeline-chart-row.active .timeline-chart-track {
+  stroke: rgba(241, 167, 63, 0.42);
+}
+
+.timeline-chart-row.active .timeline-chart-label,
+.timeline-chart-row.active .timeline-chart-count {
+  fill: var(--amber-100);
+}
+
 .case-list,
 .case-documents {
   display: grid;

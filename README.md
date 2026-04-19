@@ -33,7 +33,7 @@ The query pipeline:
 2. retrieves evidence using exact match, full-text, vector, and graph retrieval
 3. reranks the combined candidates
 4. builds an evidence packet
-5. generates an answer
+5. generates an answer using local Ollama reasoning by default, including freeform non-graph briefings
 6. validates claims against cited evidence spans
 
 ## Key Flows
@@ -92,6 +92,8 @@ flowchart TD
 - Entity network and investigator profile views
 - Attachment uploads for entities
 - Optional geocoding for location entities
+- Freeform evidence briefings routed through the local Ollama reasoning model instead of raw chunk bullets
+- Centralized analyst briefing prompts in `src/operation_lens_v2/query/prompts.py`
 - Query audit history via API
 - Browser UI served from `/ui`
 
@@ -270,6 +272,8 @@ That makes `entity_schema.json` one of the core extension points for the whole r
   PDF extraction, chunking, NER, normalization, relationship extraction, and persistence.
 - `src/operation_lens_v2/query/`
   Query parsing, retrieval, reranking, evidence building, answer generation, and claim validation.
+- `src/operation_lens_v2/query/prompts.py`
+  Shared analyst-grade system prompts for freeform, document-summary, and relationship briefings.
 - `src/operation_lens_v2/services/geocoder.py`
   Optional Nominatim-backed geocoding service.
 - `src/operation_lens_v2/runtime.py`

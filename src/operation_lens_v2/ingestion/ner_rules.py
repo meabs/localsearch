@@ -7,11 +7,20 @@ is automatically extracted here — no hardcoded type handling.
 from __future__ import annotations
 
 import logging
+import re
 
 from operation_lens_v2.ingestion.entity_schema import RegexRule, get_schema
 from operation_lens_v2.models import ExtractedEntity
 
 logger = logging.getLogger(__name__)
+_NON_DIGITS_RE = re.compile(r"\D+")
+
+
+def _mask_last_four(surface: str) -> str:
+    stripped = surface.strip()
+    if len(stripped) <= 4:
+        return "*" * len(stripped)
+    return f"{stripped[:-4]}****"
 
 
 def _resolve_span(match, rule: RegexRule) -> tuple[str, int, int] | None:
@@ -32,6 +41,42 @@ def _resolve_span(match, rule: RegexRule) -> tuple[str, int, int] | None:
     return text, start, end
 
 
+def _luhn_valid(digits: str) -> bool:
+    total = 0
+    double_digit = False
+    for char in reversed(digits):
+        value = ord(char) - ord("0")
+        if double_digit:
+            value *= 2
+            if value > 9:
+                value -= 9
+        total += value
+        double_digit = not double_digit
+    return total % 10 == 0
+
+
+def _is_valid_credit_card(surface: str) -> bool:
+    digits = _NON_DIGITS_RE.sub("", surface)
+    if not 13 <= len(digits) <= 19:
+        return False
+    return _luhn_valid(digits)
+
+
+def _is_valid_national_id(surface: str) -> bool:
+    compact = re.sub(r"[\s-]", "", surface).upper()
+    if re.fullmatch(r"(?!BG|GB|KN|NK|NT|TN|ZZ)[A-CEGHJ-PR-TW-Z]{2}\d{6}[A-D]?", compact):
+        return True
+    ssn = re.fullmatch(r"(\d{3})-(\d{2})-(\d{4})", surface.strip())
+    if not ssn:
+        return False
+    area, group, serial = ssn.groups()
+    if area in {"000", "666"} or area.startswith("9"):
+        return False
+    if group == "00" or serial == "0000":
+        return False
+    return True
+
+
 def extract_rule_entities(text: str) -> list[ExtractedEntity]:
     """Extract entities using regex rules defined in the entity schema."""
     schema = get_schema()
@@ -43,6 +88,12 @@ def extract_rule_entities(text: str) -> list[ExtractedEntity]:
                 if not resolved:
                     continue
                 surface, start, end = resolved
+                if type_name == "CREDIT_CARD" and not _is_valid_credit_card(surface):
+                    continue
+                if type_name == "NATIONAL_ID" and not _is_valid_national_id(surface):
+                    continue
+                if type_name == "NATIONAL_ID":
+                    logger.debug("Matched NATIONAL_ID %s", _mask_last_four(surface))
                 display = surface.upper() if type_name == "VEHICLE" else surface
                 out.append(
                     ExtractedEntity(

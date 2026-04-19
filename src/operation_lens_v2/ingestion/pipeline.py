@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
 from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion import (
     chunker,
+    csv_extractor,
     duck_store,
     embedder,
     extractor,
@@ -15,6 +17,7 @@ from operation_lens_v2.ingestion import (
     ner_rules,
     normaliser,
     relationship_extractor,
+    shared_metadata_linker,
     vector_store,
 )
 
@@ -39,6 +42,17 @@ def _merge_entity_sources(*sources: list) -> list:
             merged.append(entity)
             accepted_spans.append((entity.start, entity.end))
     return merged
+
+
+def _load_pages(document_path: Path) -> tuple[list[tuple[int, str]], bool, str]:
+    suffix = document_path.suffix.lower()
+    if suffix == ".csv":
+        records = csv_extractor.extract_csv(document_path)
+        return [(record.page, record.text) for record in records], False, "csv"
+    if suffix == ".pdf":
+        pages, ocr_used = extractor.extract_pdf_text(document_path)
+        return pages, ocr_used, "pdf"
+    raise ValueError(f"Unsupported document type: {document_path.suffix or document_path}")
 
 
 async def ingest_pdf(
@@ -70,7 +84,7 @@ async def ingest_pdf(
             return {"doc_id": existing[0], "case_ref": case_ref, "skipped": 1}
 
     doc_id = str(uuid4())
-    pages, ocr_used = extractor.extract_pdf_text(pdf_path)
+    pages, ocr_used, source_kind = _load_pages(pdf_path)
     duck_store.upsert_document(
         con,
         doc_id=doc_id,
@@ -81,7 +95,12 @@ async def ingest_pdf(
         case_id=case_id,
     )
     logger.info(
-        "Ingesting doc=%s pages=%d ocr=%s case=%s", pdf_path.name, len(pages), ocr_used, case_ref
+        "Ingesting doc=%s pages=%d source=%s ocr=%s case=%s",
+        pdf_path.name,
+        len(pages),
+        source_kind,
+        ocr_used,
+        case_ref,
     )
 
     chunks = chunker.chunk_pages(
@@ -90,6 +109,8 @@ async def ingest_pdf(
         target_tokens=settings.chunk_target_tokens,
         overlap_ratio=settings.chunk_overlap_tokens / settings.chunk_target_tokens,
     )
+    if source_kind != "pdf":
+        chunks = [replace(chunk, source_kind=source_kind) for chunk in chunks]
     duck_store.insert_chunks(con, chunks)
 
     vector_rows = []
@@ -173,10 +194,17 @@ async def ingest_corpus(
     case_name: str | None = None,
     force: bool = False,
 ) -> list[dict[str, int | str]]:
-    """Ingest all PDFs in a directory sequentially (one at a time to manage memory)."""
-    pdf_files = sorted(corpus_dir.glob("*.pdf"))
+    """Ingest all supported documents in a directory sequentially."""
+    db_path = db_path or settings.duckdb_path
+    pdf_files = sorted(
+        [
+            path
+            for path in corpus_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in {".pdf", ".csv"}
+        ]
+    )
     if not pdf_files:
-        logger.warning("No PDF files found in %s", corpus_dir)
+        logger.warning("No PDF or CSV files found in %s", corpus_dir)
         return []
     results = []
     for pdf_path in pdf_files:
@@ -188,4 +216,6 @@ async def ingest_corpus(
             force=force,
         )
         results.append(result)
+    con = duck_store.init_db(db_path)
+    shared_metadata_linker.link_shared_metadata(con)
     return results

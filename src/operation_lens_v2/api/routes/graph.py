@@ -13,13 +13,6 @@ from operation_lens_v2.ingestion import duck_store
 from operation_lens_v2.ingestion.duck_store import connect, get_case_id_by_ref
 from operation_lens_v2.ingestion.entity_schema import get_schema
 from operation_lens_v2.services.geocoder import GeocoderDisabled, geocode_entity
-from operation_lens_v2.services.graph_algorithms import (
-    centrality_report,
-    detect_communities,
-    expand_neighbourhood,
-    shortest_path,
-)
-from operation_lens_v2.services.graph_backend import DuckDBGraphBackend, EdgeFilter
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 IMAGE_UPLOAD_PARAM = File(...)
@@ -107,6 +100,145 @@ def _entity_timeline_events(con, entity_id: str, limit: int) -> list[dict[str, o
         )
     events.sort(key=lambda item: item["seen_at"])
     return events[:limit]
+
+
+def _load_entity_profile(con, entity_id: str, timeline_limit: int) -> dict[str, object]:
+    entity = con.execute(
+        """
+        SELECT entity_id, canonical_name, entity_type, mention_count, confidence,
+               latitude, longitude, geocode_display_name
+        FROM entities
+        WHERE entity_id = ?
+        """,
+        [entity_id],
+    ).fetchone()
+    if not entity:
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    alias_rows = con.execute(
+        """
+        SELECT DISTINCT alias_text
+        FROM entity_aliases
+        WHERE entity_id = ?
+        ORDER BY alias_text
+        """,
+        [entity_id],
+    ).fetchall()
+
+    doc_count_row = con.execute(
+        """
+        SELECT count(DISTINCT d.doc_id)
+        FROM entity_aliases ea
+        JOIN documents d ON d.doc_id = ea.source_doc
+        WHERE ea.entity_id = ?
+        """,
+        [entity_id],
+    ).fetchone()
+
+    doc_rows = con.execute(
+        """
+        SELECT
+          d.doc_id,
+          d.filename,
+          min(c.page) AS first_page,
+          count(DISTINCT ea.alias_id) AS mention_count
+        FROM entity_aliases ea
+        JOIN documents d ON d.doc_id = ea.source_doc
+        LEFT JOIN chunks c ON c.chunk_id = ea.source_chunk
+        WHERE ea.entity_id = ?
+        GROUP BY d.doc_id, d.filename
+        ORDER BY mention_count DESC, d.filename
+        LIMIT 100
+        """,
+        [entity_id],
+    ).fetchall()
+
+    link_rows = con.execute(
+        """
+        SELECT
+          r.rel_id,
+          r.relation_type,
+          r.confidence,
+          re.doc_id,
+          d.filename,
+          re.page,
+          re.span_text,
+          CASE
+            WHEN r.source_entity = ? THEN r.target_entity
+            ELSE r.source_entity
+          END AS linked_entity_id,
+          linked.canonical_name AS linked_name,
+          linked.entity_type AS linked_type
+        FROM relationships r
+        LEFT JOIN relationship_evidence re ON re.rel_id = r.rel_id
+        LEFT JOIN documents d ON d.doc_id = re.doc_id
+        JOIN entities linked
+          ON linked.entity_id = CASE
+            WHEN r.source_entity = ? THEN r.target_entity
+            ELSE r.source_entity
+          END
+        WHERE r.source_entity = ? OR r.target_entity = ?
+        ORDER BY r.confidence DESC, re.page NULLS LAST, d.filename
+        LIMIT 300
+        """,
+        [entity_id, entity_id, entity_id, entity_id],
+    ).fetchall()
+
+    links: dict[str, dict[str, object]] = {}
+    for row in link_rows:
+        rel_id = str(row[0])
+        if rel_id not in links:
+            links[rel_id] = {
+                "rel_id": rel_id,
+                "relation_type": row[1],
+                "confidence": float(row[2] or 0.0),
+                "linked_entity": {
+                    "entity_id": row[7],
+                    "canonical_name": row[8],
+                    "entity_type": row[9],
+                },
+                "citations": [],
+            }
+        if row[3] is not None:
+            links[rel_id]["citations"].append(
+                {
+                    "doc_id": row[3],
+                    "doc_name": row[4],
+                    "page": row[5] if row[5] is not None else "?",
+                    "span_text": row[6] or "",
+                }
+            )
+
+    documents = [
+        {
+            "doc_id": row[0],
+            "filename": row[1],
+            "first_page": row[2] if row[2] is not None else "?",
+            "mention_count": int(row[3] or 0),
+        }
+        for row in doc_rows
+    ]
+
+    return {
+        "entity": {
+            "entity_id": entity[0],
+            "canonical_name": entity[1],
+            "entity_type": entity[2],
+            "mention_count": int(entity[3] or 0),
+            "confidence": float(entity[4] or 0.0),
+            "geocode": {
+                "latitude": float(entity[5]) if entity[5] is not None else None,
+                "longitude": float(entity[6]) if entity[6] is not None else None,
+                "display_name": entity[7],
+            },
+        },
+        "aliases": [row[0] for row in alias_rows],
+        "documents": documents,
+        "doc_count": int(doc_count_row[0] or 0) if doc_count_row else len(documents),
+        "links": list(links.values()),
+        "timeline": _entity_timeline_events(con, entity_id, min(200, timeline_limit)),
+        "attachments": duck_store.list_attachments(con, entity_id),
+    }
 
 
 @router.get("/schema")
@@ -535,134 +667,18 @@ def list_entity_attachments(entity_id: str) -> dict[str, object]:
     }
 
 
+@router.get("/entity/{entity_id}")
+def entity(entity_id: str, timeline_limit: int = 30) -> dict[str, object]:
+    """Compatibility alias for the entity dossier used by the graph UI."""
+    con = connect(settings.duckdb_path)
+    return _load_entity_profile(con, entity_id, timeline_limit)
+
+
 @router.get("/entity/{entity_id}/profile")
 def entity_profile(entity_id: str, timeline_limit: int = 30) -> dict[str, object]:
     """Return one entity profile with aliases, links, docs, timeline, and attachments."""
     con = connect(settings.duckdb_path)
-    entity = con.execute(
-        """
-        SELECT entity_id, canonical_name, entity_type, mention_count, confidence,
-               latitude, longitude, geocode_display_name
-        FROM entities
-        WHERE entity_id = ?
-        """,
-        [entity_id],
-    ).fetchone()
-    if not entity:
-        raise HTTPException(status_code=404, detail="Entity not found")
-
-    alias_rows = con.execute(
-        """
-        SELECT DISTINCT alias_text
-        FROM entity_aliases
-        WHERE entity_id = ?
-        ORDER BY alias_text
-        LIMIT 100
-        """,
-        [entity_id],
-    ).fetchall()
-
-    doc_rows = con.execute(
-        """
-        SELECT
-          d.doc_id,
-          d.filename,
-          min(c.page) AS first_page,
-          count(DISTINCT ea.alias_id) AS mention_count
-        FROM entity_aliases ea
-        JOIN documents d ON d.doc_id = ea.source_doc
-        LEFT JOIN chunks c ON c.chunk_id = ea.source_chunk
-        WHERE ea.entity_id = ?
-        GROUP BY d.doc_id, d.filename
-        ORDER BY mention_count DESC, d.filename
-        LIMIT 100
-        """,
-        [entity_id],
-    ).fetchall()
-
-    link_rows = con.execute(
-        """
-        SELECT
-          r.rel_id,
-          r.relation_type,
-          r.confidence,
-          re.doc_id,
-          d.filename,
-          re.page,
-          re.span_text,
-          CASE
-            WHEN r.source_entity = ? THEN r.target_entity
-            ELSE r.source_entity
-          END AS linked_entity_id,
-          linked.canonical_name AS linked_name,
-          linked.entity_type AS linked_type
-        FROM relationships r
-        LEFT JOIN relationship_evidence re ON re.rel_id = r.rel_id
-        LEFT JOIN documents d ON d.doc_id = re.doc_id
-        JOIN entities linked
-          ON linked.entity_id = CASE
-            WHEN r.source_entity = ? THEN r.target_entity
-            ELSE r.source_entity
-          END
-        WHERE r.source_entity = ? OR r.target_entity = ?
-        ORDER BY r.confidence DESC, re.page NULLS LAST, d.filename
-        LIMIT 300
-        """,
-        [entity_id, entity_id, entity_id, entity_id],
-    ).fetchall()
-
-    links: dict[str, dict[str, object]] = {}
-    for row in link_rows:
-        rel_id = str(row[0])
-        if rel_id not in links:
-            links[rel_id] = {
-                "rel_id": rel_id,
-                "relation_type": row[1],
-                "confidence": float(row[2] or 0.0),
-                "linked_entity": {
-                    "entity_id": row[7],
-                    "canonical_name": row[8],
-                    "entity_type": row[9],
-                },
-                "citations": [],
-            }
-        if row[3] is not None:
-            links[rel_id]["citations"].append(
-                {
-                    "doc_id": row[3],
-                    "doc_name": row[4],
-                    "page": row[5] if row[5] is not None else "?",
-                    "span_text": row[6] or "",
-                }
-            )
-
-    return {
-        "entity": {
-            "entity_id": entity[0],
-            "canonical_name": entity[1],
-            "entity_type": entity[2],
-            "mention_count": int(entity[3] or 0),
-            "confidence": float(entity[4] or 0.0),
-            "geocode": {
-                "latitude": float(entity[5]) if entity[5] is not None else None,
-                "longitude": float(entity[6]) if entity[6] is not None else None,
-                "display_name": entity[7],
-            },
-        },
-        "aliases": [row[0] for row in alias_rows],
-        "documents": [
-            {
-                "doc_id": row[0],
-                "filename": row[1],
-                "first_page": row[2] if row[2] is not None else "?",
-                "mention_count": int(row[3] or 0),
-            }
-            for row in doc_rows
-        ],
-        "links": list(links.values()),
-        "timeline": _entity_timeline_events(con, entity_id, min(200, timeline_limit)),
-        "attachments": duck_store.list_attachments(con, entity_id),
-    }
+    return _load_entity_profile(con, entity_id, timeline_limit)
 
 
 @router.post("/entity/{entity_id}/attachments")
@@ -842,6 +858,8 @@ def _edge_filter_from_query(
     exclude_relation_types: str | None,
     include_relation_types: str | None,
 ) -> EdgeFilter:
+    from operation_lens_v2.services.graph_backend import EdgeFilter
+
     case_id: str | None = None
     if case_ref:
         case_id = get_case_id_by_ref(con, case_ref)
@@ -873,6 +891,9 @@ def path(
     Constraints (`min_confidence`, `exclude_relation_types`) trim the graph
     before traversal so pathfinding avoids noise edges (e.g. MENTIONED_WITH).
     """
+    from operation_lens_v2.services.graph_algorithms import shortest_path
+    from operation_lens_v2.services.graph_backend import DuckDBGraphBackend
+
     con = connect(settings.duckdb_path)
     backend = DuckDBGraphBackend(con)
     source_id = backend.resolve_entity_id(source)
@@ -922,6 +943,9 @@ def expand(
     case_ref: str | None = None,
 ) -> dict[str, object]:
     """One-hop expansion around a node. Accepts entity_id OR a name/alias."""
+    from operation_lens_v2.services.graph_algorithms import expand_neighbourhood
+    from operation_lens_v2.services.graph_backend import DuckDBGraphBackend
+
     con = connect(settings.duckdb_path)
     backend = DuckDBGraphBackend(con)
     resolved = backend.resolve_entity_id(entity_id)
@@ -954,6 +978,9 @@ def centrality(
     case_ref: str | None = None,
 ) -> dict[str, object]:
     """Rank entities by degree / betweenness / pagerank centrality."""
+    from operation_lens_v2.services.graph_algorithms import centrality_report
+    from operation_lens_v2.services.graph_backend import DuckDBGraphBackend
+
     con = connect(settings.duckdb_path)
     backend = DuckDBGraphBackend(con)
     edge_filter = _edge_filter_from_query(
@@ -980,6 +1007,9 @@ def communities(
     case_ref: str | None = None,
 ) -> dict[str, object]:
     """Louvain community detection. `resolution`>1 fragments more aggressively."""
+    from operation_lens_v2.services.graph_algorithms import detect_communities
+    from operation_lens_v2.services.graph_backend import DuckDBGraphBackend
+
     con = connect(settings.duckdb_path)
     backend = DuckDBGraphBackend(con)
     edge_filter = _edge_filter_from_query(

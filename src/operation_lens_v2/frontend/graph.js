@@ -3,10 +3,16 @@
   const detail = document.getElementById("node-detail");
   const form = document.getElementById("graph-form");
   const input = document.getElementById("graph-entity-input");
-  if (!cyRoot || !detail) return;
+  const graphRight = document.getElementById("graph-right");
+  if (!cyRoot || !detail || !graphRight) return;
 
   let cy = null;
   let detailRequestSeq = 0;
+  let sidebarRequestSeq = 0;
+  let graphStage = null;
+  let graphSidebar = null;
+  let graphSidebarBody = null;
+  let graphSidebarTitle = null;
   // Colours come from the backend schema (first-party) with a deterministic
   // HSL hash fallback — any new entity type gets a stable colour automatically.
   const FALLBACK_COLOR = "#5b6b7d";
@@ -86,6 +92,172 @@
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;");
+  }
+
+  function ensureGraphSidebar() {
+    if (graphSidebar) return;
+    const children = Array.from(graphRight.children);
+    graphStage = document.createElement("div");
+    graphStage.style.display = "flex";
+    graphStage.style.flexDirection = "column";
+    graphStage.style.gap = "18px";
+    graphStage.style.minWidth = "0";
+    children.forEach((child) => graphStage.appendChild(child));
+    graphRight.appendChild(graphStage);
+
+    graphSidebar = document.createElement("aside");
+    graphSidebar.className = "panel-card";
+    graphSidebar.style.display = "flex";
+    graphSidebar.style.flexDirection = "column";
+    graphSidebar.style.minWidth = "0";
+    graphSidebar.style.alignSelf = "start";
+    graphSidebar.style.position = "sticky";
+    graphSidebar.style.top = "0";
+    graphSidebar.innerHTML = `
+      <div class="card-pad" style="display:flex;flex-direction:column;gap:14px;">
+        <div class="panel-titlebar" style="margin-bottom:0;">
+          <div>
+            <div class="panel-overline">Entity summary</div>
+            <div class="panel-title" id="graph-summary-title">Select a node</div>
+            <p class="panel-copy" id="graph-summary-copy">Right-click a node to focus it and inspect cross-document metadata.</p>
+          </div>
+          <div class="panel-chip">Live</div>
+        </div>
+        <div id="graph-summary-body">
+          <div class="node-empty">Node details will appear here.</div>
+        </div>
+      </div>
+    `;
+    graphSidebarBody = graphSidebar.querySelector("#graph-summary-body");
+    graphSidebarTitle = graphSidebar.querySelector("#graph-summary-title");
+    graphRight.appendChild(graphSidebar);
+  }
+
+  function applyGraphSidebarLayout() {
+    if (!graphSidebar || !graphStage) return;
+    const narrow = window.matchMedia("(max-width: 1180px)").matches;
+    if (narrow) {
+      graphRight.style.display = "flex";
+      graphRight.style.flexDirection = "column";
+      graphRight.style.gap = "18px";
+      graphSidebar.style.position = "static";
+      graphSidebar.style.width = "100%";
+    } else {
+      graphRight.style.display = "grid";
+      graphRight.style.gridTemplateColumns = "minmax(0, 1fr) minmax(300px, 360px)";
+      graphRight.style.gap = "18px";
+      graphRight.style.alignItems = "start";
+      graphSidebar.style.position = "sticky";
+      graphSidebar.style.top = "0";
+      graphSidebar.style.width = "100%";
+    }
+    graphStage.style.width = "100%";
+  }
+
+  function renderSidebarPills(items, emptyText) {
+    if (!items || !items.length) {
+      return `<div class="node-empty" style="margin-top:0;">${escHtml(emptyText)}</div>`;
+    }
+    return items
+      .map((item) => `<span class="answer-pill" style="margin-right:6px;margin-bottom:6px;">${escHtml(item)}</span>`)
+      .join("");
+  }
+
+  function renderGraphSidebar(profile, caseBundle) {
+    if (!graphSidebarBody || !graphSidebarTitle) return;
+    const entity = profile?.entity || {};
+    const aliases = Array.isArray(profile?.aliases) ? profile.aliases : [];
+    const docs = Array.isArray(profile?.documents) ? profile.documents : [];
+    const cases = Array.isArray(caseBundle?.cases) ? caseBundle.cases : [];
+    const caseIds = Array.isArray(caseBundle?.case_ids) ? caseBundle.case_ids : [];
+    const caseLabels = cases.length ? cases.map((entry) => entry.case_ref || entry.case_id) : caseIds;
+
+    graphSidebarTitle.textContent = entity.canonical_name || "Unnamed node";
+    graphSidebarBody.innerHTML = `
+      <div class="detail-field">
+        <span class="detail-key">CANONICAL</span>
+        <span class="detail-val">${escHtml(entity.canonical_name || "Unknown")}</span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-key">TYPE</span>
+        <span class="detail-val">${escHtml(entity.entity_type || "UNKNOWN")}</span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-key">DOCS</span>
+        <span class="detail-val">${escHtml(profile?.doc_count ?? docs.length ?? 0)}</span>
+      </div>
+      <div style="margin-top:12px;color:var(--ink-faint);font-size:11px;letter-spacing:.1em;text-transform:uppercase;">Aliases</div>
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;">${renderSidebarPills(
+        aliases,
+        "No aliases recorded.",
+      )}</div>
+      <div style="margin-top:12px;color:var(--ink-faint);font-size:11px;letter-spacing:.1em;text-transform:uppercase;">Also appears in cases</div>
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;">${renderSidebarPills(
+        caseLabels,
+        "No linked cases found.",
+      )}</div>
+    `;
+  }
+
+  function renderGraphSidebarLoading(label) {
+    if (!graphSidebarBody || !graphSidebarTitle) return;
+    graphSidebarTitle.textContent = label || "Loading node";
+    graphSidebarBody.innerHTML = '<div class="node-empty">Loading entity summary...</div>';
+  }
+
+  function resetGraphSidebar() {
+    if (!graphSidebarBody || !graphSidebarTitle) return;
+    graphSidebarTitle.textContent = "Select a node";
+    graphSidebarBody.innerHTML =
+      '<div class="node-empty">Right-click a node to focus it and inspect cross-document metadata.</div>';
+  }
+
+  function renderGraphSidebarError(message) {
+    if (!graphSidebarBody || !graphSidebarTitle) return;
+    graphSidebarTitle.textContent = "Entity summary";
+    graphSidebarBody.innerHTML = `<div class="node-empty">Entity summary load failed: ${escHtml(message)}</div>`;
+  }
+
+  async function fetchGraphEntity(entityId) {
+    const resp = await fetch(apiUrl(`/graph/entity/${encodeURIComponent(entityId)}`));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return resp.json();
+  }
+
+  async function fetchEntityCases(entityId) {
+    const resp = await fetch(apiUrl(`/entities/${encodeURIComponent(entityId)}/cases`));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return resp.json();
+  }
+
+  async function loadSidebarForNode(entityId) {
+    const requestId = ++sidebarRequestSeq;
+    renderGraphSidebarLoading(entityId);
+    try {
+      const [profile, caseBundle] = await Promise.all([
+        fetchGraphEntity(entityId),
+        fetchEntityCases(entityId),
+      ]);
+      if (requestId !== sidebarRequestSeq) return;
+      renderGraphSidebar(profile, caseBundle);
+    } catch (err) {
+      if (requestId !== sidebarRequestSeq) return;
+      renderGraphSidebarError(String(err));
+    }
+  }
+
+  function focusCurrentNode(nodeId) {
+    if (!cy) return;
+    const node = cy.getElementById(nodeId);
+    if (!node || !node.length) return;
+    const neighborhood = node.closedNeighborhood().union(node);
+    cy.animate(
+      {
+        fit: { eles: neighborhood, padding: 100 },
+        center: { eles: node },
+      },
+      { duration: 260 },
+    );
   }
 
   async function fetchAttachments(entityId) {
@@ -408,6 +580,25 @@
     renderAttachments(detail, node);
   }
 
+  function selectNode(node, edges, nodes, { recenter = false } = {}) {
+    if (!node || !cy) return;
+    cy.elements().removeClass("selected edge-selected dimmed");
+    const selected = cy.getElementById(node.id);
+    if (selected && selected.length) {
+      selected.addClass("selected");
+      selected.connectedEdges().addClass("edge-selected");
+      const neighborhood = selected.closedNeighborhood();
+      cy.elements().not(neighborhood).addClass("dimmed");
+      if (recenter) {
+        focusCurrentNode(node.id);
+      }
+    }
+    setDetail(node, edges, nodes, null);
+    const queryInput = document.getElementById("query-input");
+    if (queryInput && node?.label) queryInput.value = node.label;
+    loadSidebarForNode(node.id);
+  }
+
   async function loadNetwork(entityName = "") {
     const q = entityName ? `?entity=${encodeURIComponent(entityName)}&hops=2&limit=140` : "?limit=140";
     const resp = await fetch(apiUrl(`/graph/network${q}`));
@@ -458,6 +649,8 @@
         '<div class="timeline-empty">Graph library failed to load (Cytoscape CDN unavailable).</div>';
       return;
     }
+    ensureGraphSidebar();
+    applyGraphSidebarLayout();
     cy = window.cytoscape({
       container: cyRoot,
       elements: [
@@ -585,18 +778,18 @@
       },
     });
     setDetail(null, edges, nodes, null);
+    resetGraphSidebar();
     cy.on("tap", "node", (evt) => {
       const id = evt.target.id();
       const node = nodes.find((n) => n.id === id);
-      cy.elements().removeClass("selected edge-selected dimmed");
-      const selected = evt.target;
-      selected.addClass("selected");
-      const neighborhood = selected.closedNeighborhood();
-      selected.connectedEdges().addClass("edge-selected");
-      cy.elements().not(neighborhood).addClass("dimmed");
-      setDetail(node, edges, nodes, null);
-      const queryInput = document.getElementById("query-input");
-      if (queryInput && node?.label) queryInput.value = node.label;
+      selectNode(node, edges, nodes, { recenter: false });
+    });
+    cy.on("cxttap", "node", (evt) => {
+      evt.preventDefault?.();
+      evt.originalEvent?.preventDefault?.();
+      const id = evt.target.id();
+      const node = nodes.find((n) => n.id === id);
+      selectNode(node, edges, nodes, { recenter: true });
     });
     cy.on("tap", "edge", (evt) => {
       const id = evt.target.id();
@@ -612,6 +805,7 @@
       if (evt.target === cy) {
         cy.elements().removeClass("selected edge-selected dimmed");
         setDetail(null, edges, nodes, null);
+        resetGraphSidebar();
       }
     });
   }
@@ -670,6 +864,10 @@
     cy.elements().not(hull).addClass("dimmed");
     cy.fit(hull, 80);
   });
+
+  ensureGraphSidebar();
+  applyGraphSidebarLayout();
+  window.addEventListener("resize", applyGraphSidebarLayout);
 
   loadSchemaColors().finally(() => {
     loadNetwork().catch((error) => {

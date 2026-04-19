@@ -99,6 +99,59 @@
         "group": 1, "flags": "i"
       }
     },
+    "CRYPTO_WALLET": {
+      "gliner_prompts": ["crypto wallet", "bitcoin address", "ethereum address", "wallet address", "digital wallet"],
+      "llm_aliases": ["BTC_WALLET", "ETH_WALLET", "WALLET_ADDRESS"],
+      "color": "#1f8b4c",
+      "normalise": {"strategy": "trim"},
+      "regex": {
+        "pattern": "\\b((?:bc1[ac-hj-np-z02-9]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}|0x[a-fA-F0-9]{40}))\\b",
+        "group": 1,
+        "flags": "i"
+      }
+    },
+    "MAC_ADDRESS": {
+      "gliner_prompts": ["mac address", "hardware address", "network interface address", "ethernet address"],
+      "llm_aliases": ["MAC", "HW_ADDRESS"],
+      "color": "#3d7a99",
+      "normalise": {"strategy": "upper_compact"},
+      "regex": {
+        "pattern": "\\b(([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})\\b",
+        "group": 1
+      }
+    },
+    "CREDIT_CARD": {
+      "gliner_prompts": ["credit card", "card number", "payment card", "card details"],
+      "llm_aliases": ["CARD_NUMBER", "CREDITCARD"],
+      "color": "#b56b1c",
+      "normalise": {"strategy": "upper_compact"},
+      "regex": {
+        "pattern": "\\b((?:\\d[ -]?){12,18}\\d)\\b",
+        "group": 1
+      }
+    },
+    "SOCIAL_HANDLE": {
+      "gliner_prompts": ["social handle", "username", "social link", "telegram handle", "instagram handle"],
+      "llm_aliases": ["HANDLE", "SOCIAL"],
+      "color": "#6a4fb8",
+      "normalise": {"strategy": "lower"},
+      "regex": {
+        "pattern": "((?<!\\w)@[A-Za-z0-9_]{1,30}|(?:https?://)?(?:www\\.)?(?:t\\.me|instagram\\.com)/[A-Za-z0-9_.]{1,50})\\b",
+        "group": 1,
+        "flags": "i"
+      }
+    },
+    "NATIONAL_ID": {
+      "gliner_prompts": ["national id", "national identifier", "nino", "social security number", "ssn"],
+      "llm_aliases": ["NINO", "SSN", "NATIONAL_IDENTIFIER"],
+      "color": "#8c5c7c",
+      "normalise": {"strategy": "upper_compact"},
+      "regex": {
+        "pattern": "\\b((?:[A-CEGHJ-PR-TW-Z]{2}\\s?\\d{6}\\s?[A-D]|(?!000|666|9\\d\\d)\\d{3}-?(?!00)\\d{2}-?(?!0000)\\d{4}))\\b",
+        "group": 1,
+        "flags": "i"
+      }
+    },
     "SERIAL": {
       "gliner_prompts": ["serial number", "imei", "device serial", "product serial"],
       "llm_aliases": [],

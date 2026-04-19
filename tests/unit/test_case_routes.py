@@ -78,3 +78,47 @@ async def test_ingest_upload_endpoint_stores_pdf_then_calls_pipeline(tmp_path, m
     assert captured["case_ref"] == "OP_UPLOAD"
     assert captured["case_name"] == "Upload Case"
     assert captured["force"] is False
+
+
+@pytest.mark.asyncio
+async def test_ingest_upload_endpoint_stores_csv_then_calls_pipeline(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "pdf_root", str(tmp_path / "pdfs"))
+
+    captured: dict[str, object] = {}
+
+    async def fake_ingest_pdf(pdf_path, *, case_ref, case_name, force):
+        captured["pdf_path"] = pdf_path
+        captured["case_ref"] = case_ref
+        captured["case_name"] = case_name
+        captured["force"] = force
+        return {
+            "doc_id": "doc-csv-123",
+            "case_ref": case_ref,
+            "pages": 3,
+            "chunks": 3,
+            "relationships": 0,
+        }
+
+    monkeypatch.setattr("operation_lens_v2.api.routes.ingest.ingest_pdf", fake_ingest_pdf)
+
+    upload = UploadFile(
+        filename="evidence.csv",
+        file=BytesIO(b"row_id,name\n1,Alice\n2,Bob\n"),
+    )
+
+    result = await ingest_upload_endpoint(
+        file=upload,
+        case_ref="OP_UPLOAD",
+        case_name="Upload Case",
+        force=True,
+    )
+
+    stored_path = tmp_path / "pdfs" / "OP_UPLOAD" / "evidence.csv"
+    assert stored_path.exists()
+    assert stored_path.read_bytes() == b"row_id,name\n1,Alice\n2,Bob\n"
+    assert result["stored_path"] == str(stored_path)
+    assert result["filename"] == "evidence.csv"
+    assert captured["pdf_path"] == stored_path
+    assert captured["case_ref"] == "OP_UPLOAD"
+    assert captured["case_name"] == "Upload Case"
+    assert captured["force"] is True
