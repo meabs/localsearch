@@ -22,19 +22,17 @@ class Settings(BaseSettings):
 
     # On-device models (must be present in `ollama list`)
     local_reasoning_model: str = Field(
-        default="qwen3.5:32b-instruct-q4_K_M", alias="LOCAL_REASONING_MODEL"
+        default="deepseek-r1:latest", alias="LOCAL_REASONING_MODEL"
     )
     local_extraction_model: str = Field(
-        default="qwen3:8b-instruct-q4_K_M", alias="LOCAL_EXTRACTION_MODEL"
+        default="llama3.1:8b-instruct-q4_K_M", alias="LOCAL_EXTRACTION_MODEL"
     )
     local_embed_model: str = Field(default="nomic-embed-text", alias="LOCAL_EMBED_MODEL")
 
     # Investigator agent models (tool-calling loop + briefing writer + critic)
-    investigator_model: str = Field(
-        default="qwen2.5:14b-instruct-q4_K_M", alias="INVESTIGATOR_MODEL"
-    )
-    writer_model: str = Field(default="qwen2.5:32b-instruct-q4_K_M", alias="WRITER_MODEL")
-    critic_model: str = Field(default="qwen2.5:7b-instruct-q4_K_M", alias="CRITIC_MODEL")
+    investigator_model: str = Field(default="gemma4:26b", alias="INVESTIGATOR_MODEL")
+    writer_model: str = Field(default="deepseek-r1:latest", alias="WRITER_MODEL")
+    critic_model: str = Field(default="llama3.1:8b-instruct-q4_K_M", alias="CRITIC_MODEL")
     investigator_max_iterations: int = Field(default=10, alias="INVESTIGATOR_MAX_ITERATIONS")
     investigator_timeout: float = Field(default=180.0, alias="INVESTIGATOR_TIMEOUT")
 

@@ -147,10 +147,16 @@ used when explicitly requested, and span text is redacted before any external ca
 Recommended Ollama models (override in `config/.env` to match what you have):
 
 - Local reasoning: `deepseek-r1:latest`
-- Investigator: `deepseek-r1:latest`
+- Investigator: `gemma4:26b`
 - Writer: `deepseek-r1:latest`
 - Critic / extraction: `llama3.1:8b-instruct-q4_K_M`
 - Embedding: `nomic-embed-text`
+
+Recommended role split:
+
+- Use `gemma4:26b` for the investigator because it supports tool calling over Ollama `/v1`.
+- Use `deepseek-r1:latest` for the writer and legacy reasoning path when you want deeper narrative analysis.
+- Keep the critic and extraction path on a smaller model for cheaper structured validation.
 
 ---
 

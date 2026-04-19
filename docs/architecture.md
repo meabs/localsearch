@@ -69,12 +69,18 @@
 
 ## Current Model Roles
 
-- `LOCAL_REASONING_MODEL`: legacy local answer generation.
-- `INVESTIGATOR_MODEL`: local tool-using investigator agent.
-- `WRITER_MODEL`: local narrative briefing writer.
-- `CRITIC_MODEL`: local lightweight critic or extraction helper.
-- `LOCAL_EXTRACTION_MODEL`: claim extraction and validation helper.
+- `LOCAL_REASONING_MODEL`: `deepseek-r1:latest` for the legacy local answer path.
+- `INVESTIGATOR_MODEL`: `gemma4:26b` for the tool-using investigator loop.
+- `WRITER_MODEL`: `deepseek-r1:latest` for deeper narrative briefing synthesis.
+- `CRITIC_MODEL`: `llama3.1:8b-instruct-q4_K_M` for lightweight critique and structured checks.
+- `LOCAL_EXTRACTION_MODEL`: `llama3.1:8b-instruct-q4_K_M` for claim extraction and validation.
 - `LOCAL_EMBED_MODEL`: embedding generation for LanceDB.
+
+### Why this split
+
+- `gemma4:26b` is the default investigator because it supports tool calling over Ollama `/v1` in the current local setup.
+- `deepseek-r1:latest` remains the writer and legacy reasoning model because it gives richer narrative analysis when tools are not required.
+- Smaller 8B models stay on critic and extraction work to keep validation passes cheap and responsive.
 
 ## Response Paths
 
