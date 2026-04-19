@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     local_embed_model: str = Field(default="nomic-embed-text", alias="LOCAL_EMBED_MODEL")
 
     # Investigator agent models (tool-calling loop + briefing writer + critic)
-    investigator_model: str = Field(default="gemma4:26b", alias="INVESTIGATOR_MODEL")
+    investigator_model: str = Field(default="gpt-oss:20b", alias="INVESTIGATOR_MODEL")
     writer_model: str = Field(default="deepseek-r1:latest", alias="WRITER_MODEL")
     critic_model: str = Field(default="llama3.1:8b-instruct-q4_K_M", alias="CRITIC_MODEL")
     investigator_max_iterations: int = Field(default=10, alias="INVESTIGATOR_MAX_ITERATIONS")
