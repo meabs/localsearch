@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import asdict
 from typing import Any
 
 from operation_lens_v2.config import settings
+from operation_lens_v2.query.atomic_facts import AtomicFact, extract_atomic_facts
 from operation_lens_v2.query.prompts import (
     DOCUMENT_SUMMARY_SYSTEM_PROMPT,
     FREEFORM_SYSTEM_PROMPT,
@@ -89,6 +91,51 @@ DOCUMENT_FINDING_KEYWORDS = (
 )
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|;\s+")
 WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _build_raw_context(
+    chunks: list[dict[str, Any]],
+    *,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    raw_context: list[dict[str, Any]] = []
+    for chunk in chunks[:limit]:
+        cleaned_text = _clean_document_text(chunk.get("text"))
+        if not cleaned_text:
+            continue
+        raw_context.append(
+            {
+                "doc_id": chunk.get("doc_name") or chunk.get("doc_id") or UNKNOWN_DOC,
+                "page": chunk.get("page") or "?",
+                "text": cleaned_text[:DOCUMENT_ANALYSIS_TEXT_LIMIT],
+            }
+        )
+    return raw_context
+
+
+def _serialize_atomic_facts(atomic_facts: list[AtomicFact]) -> list[dict[str, Any]]:
+    return [asdict(fact) for fact in atomic_facts]
+
+
+def _serialize_known_entities(exact_matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    known_entities: list[dict[str, Any]] = []
+    for item in exact_matches:
+        citations = []
+        for citation in item.get("citations", []):
+            citations.append(
+                {
+                    "doc_id": citation.get("doc_id") or citation.get("doc_name") or UNKNOWN_DOC,
+                    "page": citation.get("page") or "?",
+                }
+            )
+        known_entities.append(
+            {
+                "canonical_name": item.get("canonical_name") or item.get("alias_text") or "Unknown",
+                "entity_type": item.get("entity_type") or "UNKNOWN",
+                "citations": citations,
+            }
+        )
+    return known_entities
 
 
 def _aggregate_exact_matches(exact_matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -273,6 +320,61 @@ def _chunk_fallback_lines(chunks: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _deterministic_freeform_fallback(
+    evidence_packet: dict[str, Any],
+    exact_matches: list[dict[str, Any]],
+    chunks: list[dict[str, Any]],
+) -> tuple[str, list[dict[str, Any]]]:
+    exact_findings = _aggregate_exact_matches(exact_matches)
+    if not exact_findings:
+        if chunks:
+            return "\n".join(_chunk_fallback_lines(chunks)), []
+        return RELATIONSHIP_MISSING_MESSAGE, []
+
+    people: list[str] = []
+    places: list[str] = []
+    assets: list[str] = []
+    finding_lines: list[str] = []
+    claims: list[dict[str, Any]] = []
+
+    for item in exact_findings[:EXACT_FINDINGS_LIMIT]:
+        entity_line = f"{item['canonical_name']} ({item['entity_type']})"
+        entity_type = str(item.get("entity_type", "UNKNOWN")).upper()
+        if entity_type == "PERSON":
+            people.append(entity_line)
+        elif entity_type == "LOCATION":
+            places.append(entity_line)
+        else:
+            assets.append(entity_line)
+
+        citations = item.get("citations", [])[:OPENROUTER_CITATION_LIMIT]
+        citation_text = ", ".join(f"{c['doc_id']} p.{c['page']}" for c in citations)
+        alias_hint = f" (aliases: {', '.join(item['aliases'][:2])})" if item.get("aliases") else ""
+        finding_lines.append(
+            f"{item['canonical_name']} identified in {item['doc_count']} doc(s), "
+            f"{item['evidence_count']} evidence span(s){alias_hint}. {citation_text}"
+        )
+        claims.append({"text": item["canonical_name"], "citations": citations, "confidence": 0.65})
+
+    answer = "\n".join(
+        [
+            "PEOPLE",
+            ", ".join(people) if people else "None identified",
+            "PLACES",
+            ", ".join(places) if places else "None identified",
+            "ASSETS",
+            ", ".join(assets) if assets else "None identified",
+            "KEY FINDINGS",
+            *finding_lines,
+            "CONFIDENCE POSTURE",
+            ENTITY_LINKAGE_POSTURE,
+            "EVIDENCE GAPS",
+            NO_GRAPH_RELATIONSHIP_GAP,
+        ]
+    )
+    return answer, claims
+
+
 def _clean_document_text(text: Any) -> str:
     return WHITESPACE_RE.sub(" ", str(text or "")).strip()
 
@@ -400,36 +502,29 @@ async def _local_document_analysis(
     evidence_packet: dict[str, Any],
     chunks: list[dict[str, Any]],
 ) -> str | None:
-    excerpts = []
-    for chunk in chunks[:DOCUMENT_ANALYSIS_CHUNK_LIMIT]:
-        cleaned_text = _clean_document_text(chunk.get("text"))
-        if not cleaned_text:
-            continue
-        excerpts.append(
-            {
-                "doc_id": chunk.get("doc_name") or chunk.get("doc_id") or UNKNOWN_DOC,
-                "page": chunk.get("page") or "?",
-                "text": cleaned_text[:DOCUMENT_ANALYSIS_TEXT_LIMIT],
-            }
-        )
-    if not excerpts:
+    raw_context = _build_raw_context(chunks, limit=3)
+    if not raw_context:
         return None
 
-    prompt_obj = {
-        "task": "Summarise one investigative document into operational findings",
-        "query": evidence_packet.get("query_text"),
-        "case_scope": evidence_packet.get("case_scope", "ALL_CASES"),
-        "instructions": [
-            "Ignore cover-sheet metadata, grading fields, handling codes, and repeated headers unless operationally relevant.",
-            "Extract concrete findings from the content itself.",
-            "Prefer events, locations, timings, assets, leads, and reported activity.",
-            "Keep each finding concise and cite it as [DOC_ID, p.N].",
-            "Return plain text only with sections: KEY FINDINGS, CONFIDENCE POSTURE, EVIDENCE GAPS.",
-        ],
-        "excerpts": excerpts,
-    }
     try:
         client = get_http_client(base_url=settings.ollama_base_url, timeout=settings.ollama_timeout)
+        atomic_facts = await extract_atomic_facts(chunks, client)
+        prompt_obj = {
+            "task": "Summarise one investigative document into operational findings",
+            "query": evidence_packet.get("query_text"),
+            "case_scope": evidence_packet.get("case_scope", "ALL_CASES"),
+            "atomic_facts": _serialize_atomic_facts(atomic_facts),
+            "raw_context": raw_context,
+            "instructions": [
+                "Use atomic_facts as the primary evidence base.",
+                "Use raw_context only for short supporting quotations.",
+                "Ignore cover-sheet metadata, grading fields, handling codes, and repeated headers unless operationally relevant.",
+                "Extract concrete findings from the content itself.",
+                "Prefer events, locations, timings, assets, leads, and reported activity.",
+                "Keep each finding concise and cite it as [DOC_ID, p.N].",
+                "Return plain text only with sections: KEY FINDINGS, CONFIDENCE POSTURE, EVIDENCE GAPS.",
+            ],
+        }
         response = await client.post(
             "/api/generate",
             json={
@@ -457,53 +552,49 @@ async def _local_freeform_analysis(
     chunks: list[dict[str, Any]],
     exact_matches: list[dict[str, Any]],
 ) -> str | None:
-    excerpts: list[dict[str, Any]] = []
-    for chunk in chunks[:DOCUMENT_ANALYSIS_CHUNK_LIMIT]:
-        cleaned_text = _clean_document_text(chunk.get("text"))
-        if not cleaned_text:
-            continue
-        excerpts.append(
-            {
-                "doc_id": chunk.get("doc_name") or chunk.get("doc_id") or UNKNOWN_DOC,
-                "page": chunk.get("page") or "?",
-                "text": cleaned_text[:DOCUMENT_ANALYSIS_TEXT_LIMIT],
-            }
-        )
-    if not excerpts:
+    query_intent = str(evidence_packet.get("query_intent") or "")
+    raw_context = _build_raw_context(chunks, limit=3)
+    if query_intent == "connection_query" and not raw_context:
         return None
-
-    known_entities: list[dict[str, Any]] = []
-    for item in exact_matches:
-        citations = []
-        for citation in item.get("citations", []):
-            citations.append(
-                {
-                    "doc_id": citation.get("doc_id") or citation.get("doc_name") or UNKNOWN_DOC,
-                    "page": citation.get("page") or "?",
-                }
-            )
-        known_entities.append(
-            {
-                "canonical_name": item.get("canonical_name") or item.get("alias_text") or "Unknown",
-                "entity_type": item.get("entity_type") or "UNKNOWN",
-                "citations": citations,
-            }
-        )
 
     prompt_obj = {
         "task": "Analyse freeform evidence into an operational briefing",
         "query": evidence_packet.get("query_text"),
         "case_scope": evidence_packet.get("case_scope", "ALL_CASES"),
-        "known_entities": known_entities,
-        "instructions": [
-            "Use only the supplied evidence excerpts and known entities.",
-            "Return plain text only.",
-            "Produce a narrative operational briefing with concise findings.",
-        ],
-        "excerpts": excerpts,
     }
     try:
         client = get_http_client(base_url=settings.ollama_base_url, timeout=settings.ollama_timeout)
+        if query_intent == "connection_query":
+            atomic_facts = await extract_atomic_facts(chunks, client)
+            prompt_obj.update(
+                {
+                    "atomic_facts": _serialize_atomic_facts(atomic_facts),
+                    "raw_context": raw_context,
+                    "hypothesised_links": evidence_packet.get("link_candidates")
+                    or evidence_packet.get("hypothesised_links")
+                    or [],
+                    "known_entities": _serialize_known_entities(exact_matches),
+                    "instructions": [
+                        "Use atomic_facts as the main evidence base.",
+                        "Use hypothesised_links to shape the connection hypothesis, but do not invent facts.",
+                        "Use raw_context only for short supporting quotations.",
+                        "Return plain text only.",
+                        "Produce a narrative operational briefing with concise findings.",
+                    ],
+                }
+            )
+        else:
+            prompt_obj.update(
+                {
+                    "known_entities": _serialize_known_entities(exact_matches),
+                    "instructions": [
+                        "Use only the supplied evidence excerpts and known entities.",
+                        "Return plain text only.",
+                        "Produce a narrative operational briefing with concise findings.",
+                    ],
+                    "excerpts": raw_context,
+                }
+            )
         response = await client.post(
             "/api/generate",
             json={
@@ -679,6 +770,21 @@ async def generate_answer(
             answer = "\n".join(fallback_lines)
         return {"backend": backend_used, "answer": answer, "claims": claims}
 
+    if query_intent == "connection_query" and chunks:
+        local_connection_analysis = await _local_freeform_analysis(
+            evidence_packet, chunks, exact_matches
+        )
+        if local_connection_analysis:
+            return {
+                "backend": settings.local_reasoning_model,
+                "answer": local_connection_analysis,
+                "claims": [],
+            }
+        answer, claims = _deterministic_freeform_fallback(
+            evidence_packet, exact_matches, chunks
+        )
+        return {"backend": backend_used, "answer": answer, "claims": claims}
+
     if not relationships:
         local_freeform_analysis = await _local_freeform_analysis(
             evidence_packet, chunks, exact_matches
@@ -689,60 +795,7 @@ async def generate_answer(
                 "answer": local_freeform_analysis,
                 "claims": [],
             }
-
-        exact_findings = _aggregate_exact_matches(exact_matches)
-        if not exact_findings:
-            if chunks:
-                answer = "\n".join(_chunk_fallback_lines(chunks))
-            else:
-                answer = RELATIONSHIP_MISSING_MESSAGE
-            claims = []
-        else:
-            people: list[str] = []
-            places: list[str] = []
-            assets: list[str] = []
-            finding_lines: list[str] = []
-            claims = []
-
-            for item in exact_findings[:EXACT_FINDINGS_LIMIT]:
-                entity_line = f"{item['canonical_name']} ({item['entity_type']})"
-                entity_type = str(item.get("entity_type", "UNKNOWN")).upper()
-                if entity_type == "PERSON":
-                    people.append(entity_line)
-                elif entity_type == "LOCATION":
-                    places.append(entity_line)
-                else:
-                    assets.append(entity_line)
-
-                citations = item.get("citations", [])[:OPENROUTER_CITATION_LIMIT]
-                citation_text = ", ".join(f"{c['doc_id']} p.{c['page']}" for c in citations)
-                alias_hint = (
-                    f" (aliases: {', '.join(item['aliases'][:2])})" if item.get("aliases") else ""
-                )
-                finding_lines.append(
-                    f"{item['canonical_name']} identified in {item['doc_count']} doc(s), "
-                    f"{item['evidence_count']} evidence span(s){alias_hint}. {citation_text}"
-                )
-                claims.append(
-                    {"text": item["canonical_name"], "citations": citations, "confidence": 0.65}
-                )
-
-            answer = "\n".join(
-                [
-                    "PEOPLE",
-                    ", ".join(people) if people else "None identified",
-                    "PLACES",
-                    ", ".join(places) if places else "None identified",
-                    "ASSETS",
-                    ", ".join(assets) if assets else "None identified",
-                    "KEY FINDINGS",
-                    *finding_lines,
-                    "CONFIDENCE POSTURE",
-                    ENTITY_LINKAGE_POSTURE,
-                    "EVIDENCE GAPS",
-                    NO_GRAPH_RELATIONSHIP_GAP,
-                ]
-            )
+        answer, claims = _deterministic_freeform_fallback(evidence_packet, exact_matches, chunks)
     else:
         findings = _aggregate_relationships(relationships)
         top_findings = findings[:RELATIONSHIP_FINDINGS_LIMIT]

@@ -89,6 +89,7 @@ flowchart TD
 - Case management for grouping evidence under case references
 - Exact, full-text, vector, and graph retrieval
 - Query expansion for freeform searches plus co-occurrence retrieval for connection questions
+- Atomic-fact extraction for connection and summary briefings before 32b narrative generation
 - Timeline extraction from dated passages
 - Entity network and investigator profile views
 - Attachment uploads for entities
@@ -276,6 +277,8 @@ That makes `entity_schema.json` one of the core extension points for the whole r
   Query parsing, retrieval, reranking, evidence building, answer generation, and claim validation.
 - `src/operation_lens_v2/query/prompts.py`
   Shared analyst-grade system prompts for freeform, document-summary, and relationship briefings.
+- `src/operation_lens_v2/query/atomic_facts.py`
+  Structured fact extraction layer used to turn raw chunk text into provenance-carrying atomic facts before local narrative briefing generation.
 - `src/operation_lens_v2/services/geocoder.py`
   Optional Nominatim-backed geocoding service.
 - `src/operation_lens_v2/runtime.py`
