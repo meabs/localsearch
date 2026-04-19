@@ -88,12 +88,14 @@ flowchart TD
 - PDF ingestion through API and browser upload
 - Case management for grouping evidence under case references
 - Exact, full-text, vector, and graph retrieval
+- Query expansion for freeform searches plus co-occurrence retrieval for connection questions
 - Timeline extraction from dated passages
 - Entity network and investigator profile views
 - Attachment uploads for entities
 - Optional geocoding for location entities
 - Freeform evidence briefings routed through the local Ollama reasoning model instead of raw chunk bullets
 - Centralized analyst briefing prompts in `src/operation_lens_v2/query/prompts.py`
+- Connection queries can surface shared evidence even when typed graph relationships are missing
 - Query audit history via API
 - Browser UI served from `/ui`
 

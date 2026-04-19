@@ -8,6 +8,7 @@ import pytest
 
 from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion.duck_store import init_db
+from operation_lens_v2.query.evidence_builder import build_evidence_packet
 from operation_lens_v2.query import reranker
 from operation_lens_v2.query.parser import parse_query
 from operation_lens_v2.query.pipeline import (
@@ -92,6 +93,13 @@ def test_parse_query_routes_phone_association_list_to_relationship_inventory():
     assert parsed["intent"] == "entity_relationship_inventory_query"
     assert parsed["inventory_target"] == "PHONE"
     assert parsed["relationship_focus"] is True
+
+
+def test_parse_query_detects_connection_query_and_resolves_two_endpoints():
+    parsed = parse_query("What connects Webb to Khalil?")
+    assert parsed["intent"] == "connection_query"
+    assert len(parsed["resolved_entity_ids"]) == 2
+    assert parsed["resolved_entity_ids"] == ["Webb", "Khalil"]
 
 
 def test_query_needs_history_context_only_for_short_referential_followups():
@@ -238,6 +246,30 @@ def test_inventory_query_deduplicates_same_filename_page_across_duplicate_docs()
     assert len(citations) == 1
     assert citations[0]["doc_name"] == "same-file.pdf"
     assert "richer phone context" in citations[0]["span_text"]
+
+
+def test_build_evidence_packet_includes_link_candidates_for_connection_queries():
+    packet = build_evidence_packet(
+        query_text="What connects Webb to Khalil?",
+        query_intent="connection_query",
+        entities_resolved=[
+            {"entity_id": "entity-webb", "canonical_name": "Webb", "entity_type": "PERSON"},
+            {"entity_id": "entity-khalil", "canonical_name": "Khalil", "entity_type": "PERSON"},
+        ],
+        ranked_results=[
+            {
+                "source": "cooccurrence",
+                "doc_id": "doc-1",
+                "page": 1,
+                "chunk_id": "chunk-1",
+                "text": "Webb met Khalil at the depot.",
+                "entity_pair": ["entity-webb", "entity-khalil"],
+            }
+        ],
+    )
+
+    assert packet["link_candidates"]
+    assert packet["link_candidates"][0]["entity_pair"] == ["entity-webb", "entity-khalil"]
 
 
 @pytest.mark.asyncio
@@ -627,6 +659,82 @@ async def test_run_query_summarises_requested_document_from_chunks(tmp_path, mon
     assert "North Yard" in result["answer"]
     assert "OC-INT-003.pdf" in result["answer"]
     assert observed_packet["query_intent"] == "document_summary_query"
+
+
+@pytest.mark.asyncio
+async def test_run_query_connection_query_returns_cooccurrence_rows(tmp_path, monkeypatch):
+    await close_runtime_resources()
+    db_path = tmp_path / "connection-query.duckdb"
+    con = init_db(str(db_path))
+    monkeypatch.setattr(settings, "duckdb_path", str(db_path))
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.query_expander.expand_query",
+        AsyncMock(return_value=["What connects Webb to Khalil?"]),
+    )
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.retriever_exact.retrieve_exact",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.retriever_fts.retrieve_fts",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.retriever_graph.retrieve_graph",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.retriever_vector.retrieve_vector",
+        AsyncMock(return_value=[]),
+    )
+
+    observed_packet: dict[str, object] = {}
+
+    async def fake_generate_answer(packet, *, use_cloud: bool):
+        observed_packet.update(packet)
+        return {"backend": "local-test", "answer": "cooccurrence", "claims": []}
+
+    async def passthrough_validate(payload):
+        return {**payload, "claims": []}
+
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.llm_router.generate_answer",
+        fake_generate_answer,
+    )
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.claim_validator.validate_claims",
+        passthrough_validate,
+    )
+
+    import uuid
+
+    case_id = str(uuid.uuid4())
+    doc_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+    webb_id = str(uuid.uuid4())
+    khalil_id = str(uuid.uuid4())
+
+    con.execute(
+        "INSERT INTO cases (case_id, case_ref, case_name) VALUES (?, ?, ?)",
+        [case_id, "OP_CONN", "Connection Case"],
+    )
+    con.execute(INSERT_DOCUMENT_SQL, [doc_id, case_id, "conn.pdf", "/tmp/conn.pdf", 1])
+    con.execute(
+        INSERT_CHUNK_SQL,
+        [chunk_id, doc_id, 1, 0, "Webb met Khalil at the depot.", 8],
+    )
+    con.execute(INSERT_ENTITY_SQL, [webb_id, "Webb", "PERSON", doc_id])
+    con.execute(INSERT_ENTITY_SQL, [khalil_id, "Khalil", "PERSON", doc_id])
+    con.execute(INSERT_ALIAS_SQL, [str(uuid.uuid4()), webb_id, "Webb", doc_id, chunk_id])
+    con.execute(INSERT_ALIAS_SQL, [str(uuid.uuid4()), khalil_id, "Khalil", doc_id, chunk_id])
+
+    result = await run_query("What connects Webb to Khalil?", case_ref="OP_CONN")
+
+    assert result["intent"] == "connection_query"
+    assert result["result_count"] == 1
+    assert result["top_results"][0]["source"] == "cooccurrence"
+    assert result["top_results"][0]["entity_pair"] == [webb_id, khalil_id]
+    assert observed_packet["link_candidates"]
 
 
 # ── FTS retriever ──────────────────────────────────────────────────────────────

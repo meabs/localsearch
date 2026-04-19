@@ -35,6 +35,45 @@ HIGH_RECALL_HINTS = (
     "every related",
 )
 PERSON_NAME_PATTERN = re.compile(r"\b[A-Z][a-z]+\s+[A-Z][a-z]+\b")
+SINGLE_ENTITY_PATTERN = re.compile(r"\b[A-Z][A-Za-z0-9._-]+\b")
+CONNECTION_HINT_PATTERN = re.compile(
+    r"\b(connect|connects|connected|link|links|linked|between|relationship|relate|relates|related)\b"
+)
+HOW_RELATE_PATTERN = re.compile(r"\bhow\s+does\b.*\brelate\b")
+CONNECTION_QUERY_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "between",
+    "can",
+    "connect",
+    "connected",
+    "connects",
+    "does",
+    "for",
+    "from",
+    "give",
+    "how",
+    "is",
+    "link",
+    "linked",
+    "links",
+    "me",
+    "of",
+    "on",
+    "or",
+    "related",
+    "relate",
+    "relates",
+    "relationship",
+    "the",
+    "to",
+    "what",
+    "which",
+    "who",
+    "why",
+}
 ADDRESS_LIKE_SUFFIXES = {
     "road",
     "street",
@@ -94,6 +133,38 @@ def _looks_like_address_phrase(value: str) -> bool:
     return tokens[-1].lower() in ADDRESS_LIKE_SUFFIXES
 
 
+def _collect_connection_entities(query: str) -> list[str]:
+    candidates: list[str] = []
+    excluded_single_tokens: set[str] = set()
+    for hit in PERSON_NAME_PATTERN.findall(query):
+        if not _looks_like_address_phrase(hit):
+            candidates.append(hit)
+            excluded_single_tokens.update(part.lower() for part in hit.split())
+    for hit in EXACT_TOKEN_PATTERN.findall(query):
+        candidates.append(hit)
+    for hit in SINGLE_ENTITY_PATTERN.findall(query):
+        lowered = hit.lower()
+        if lowered in CONNECTION_QUERY_STOPWORDS:
+            continue
+        if lowered in excluded_single_tokens:
+            continue
+        if _looks_like_address_phrase(hit):
+            continue
+        candidates.append(hit)
+    return list(dict.fromkeys(candidates))
+
+
+def _is_connection_query(query_lower: str, entity_mentions: list[str]) -> bool:
+    return (
+        len(entity_mentions) >= 2
+        and (
+            _contains_any_token(query_lower, ("connect", "link", "between", "relationship"))
+            or bool(HOW_RELATE_PATTERN.search(query_lower))
+        )
+        and bool(CONNECTION_HINT_PATTERN.search(query_lower) or HOW_RELATE_PATTERN.search(query_lower))
+    )
+
+
 def parse_query(query: str) -> dict[str, object]:
     entities: list[str] = []
     document_refs: list[str] = []
@@ -111,6 +182,13 @@ def parse_query(query: str) -> dict[str, object]:
     exact_tokens = EXACT_TOKEN_PATTERN.findall(query)
     if exact_tokens:
         intent = "exact_identifier_query"
+
+    connection_entities = _collect_connection_entities(query)
+    resolved_entity_ids: list[str] = []
+    if _is_connection_query(q, connection_entities):
+        intent = "connection_query"
+        entities = connection_entities
+        resolved_entity_ids = connection_entities[:2]
 
     document_refs = list(dict.fromkeys(DOCUMENT_REFERENCE_PATTERN.findall(query)))
     if document_refs:
@@ -145,6 +223,7 @@ def parse_query(query: str) -> dict[str, object]:
     return {
         "intent": intent,
         "entities": entities,
+        "resolved_entity_ids": resolved_entity_ids,
         "document_refs": document_refs,
         "inventory_target": inventory_target,
         "relationship_focus": relationship_focus,

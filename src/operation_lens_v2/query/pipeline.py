@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import re
+from time import perf_counter
 from uuid import uuid4
 
 from operation_lens_v2.config import settings
@@ -13,13 +14,14 @@ from operation_lens_v2.query import (
     evidence_builder,
     llm_router,
     parser,
+    query_expander,
     reranker,
     retriever_exact,
     retriever_fts,
     retriever_graph,
     retriever_vector,
 )
-from operation_lens_v2.runtime import StageTimer, get_duck_connection
+from operation_lens_v2.runtime import StageTimer, get_duck_connection, get_http_client
 from operation_lens_v2.store import get_graph_backend
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,7 @@ INVENTORY_EVIDENCE_GAP = (
 CHAT_HISTORY_TURN_LIMIT = 6
 CHAT_HISTORY_LINE_LIMIT = 18
 VALID_RECALL_MODES = {"fast", "balanced", "exhaustive", "auto"}
+QUERY_EXPANSION_TIME_BUDGET_SECONDS = 5.0
 RELATIONSHIP_TEXT = {
     "ASSOCIATED_WITH": "is associated with",
     "OBSERVED_AT": "was observed at",
@@ -266,6 +269,119 @@ def _attach_document_names(
             row_copy["doc_name"] = document_names[doc_id]
         enriched.append(row_copy)
     return enriched
+
+
+def _merge_rows_by_chunk_id(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    merged: dict[str, dict[str, object]] = {}
+    for idx, row in enumerate(rows):
+        key = str(row.get("chunk_id") or row.get("rel_id") or row.get("entity_id") or idx)
+        score = float(row.get("score", row.get("confidence", 0.0)) or 0.0)
+        current = merged.get(key)
+        if current is None:
+            merged[key] = dict(row)
+            continue
+        current_score = float(current.get("score", current.get("confidence", 0.0)) or 0.0)
+        if score > current_score:
+            merged[key] = dict(row)
+    return sorted(
+        merged.values(),
+        key=lambda row: float(row.get("score", row.get("confidence", 0.0)) or 0.0),
+        reverse=True,
+    )
+
+
+def _cooccurrence_rows(
+    con,
+    *,
+    entity_ids: list[str],
+    case_id: str | None,
+) -> list[dict[str, object]]:
+    unique_entity_ids = [entity_id for entity_id in dict.fromkeys(entity_ids) if entity_id]
+    if len(unique_entity_ids) < 2:
+        return []
+
+    pair = unique_entity_ids[:2]
+    placeholders = ",".join(["?"] * len(pair))
+    params: list[object] = [*pair]
+    case_filter = ""
+    if case_id:
+        case_filter = "AND d.case_id = ?"
+        params.append(case_id)
+
+    rows = con.execute(
+        f"""
+        WITH matching_chunks AS (
+          SELECT source_chunk
+          FROM entity_aliases
+          WHERE entity_id IN ({placeholders})
+            AND source_chunk IS NOT NULL
+          GROUP BY source_chunk
+          HAVING count(DISTINCT entity_id) = 2
+        )
+        SELECT c.chunk_id, c.doc_id, d.filename, c.page, c.text
+        FROM matching_chunks mc
+        JOIN chunks c ON c.chunk_id = mc.source_chunk
+        JOIN documents d ON d.doc_id = c.doc_id
+        WHERE 1 = 1
+        {case_filter}
+        ORDER BY d.filename, c.page, c.chunk_index
+        """,
+        params,
+    ).fetchall()
+
+    return [
+        {
+            "source": "cooccurrence",
+            "chunk_id": row[0],
+            "doc_id": row[1],
+            "doc_name": row[2],
+            "page": row[3],
+            "text": row[4] or "",
+            "score": 0.96,
+            "entity_pair": pair,
+        }
+        for row in rows
+    ]
+
+
+async def _retrieve_query_rows(
+    con,
+    *,
+    query_text: str,
+    case_id: str | None,
+    fts_limit: int,
+    vector_limit: int,
+    timeout_seconds: float | None = None,
+) -> list[dict[str, object]]:
+    start = perf_counter()
+    vector_task = asyncio.create_task(
+        retriever_vector.retrieve_vector(query_text, limit=vector_limit)
+    )
+    try:
+        fts_rows: list[dict[str, object]] = []
+        try:
+            fts_rows = retriever_fts.retrieve_fts(
+                con,
+                query_text,
+                limit=fts_limit,
+                case_id=case_id,
+            )
+        except Exception as exc:
+            logger.debug("FTS retrieval failed for query expansion: %s", exc)
+        try:
+            vector_rows = await vector_task
+        except Exception as exc:
+            logger.debug("Vector retrieval failed for query expansion: %s", exc)
+            vector_rows = []
+        rows = [*fts_rows, *vector_rows]
+        if timeout_seconds is not None and (perf_counter() - start) > timeout_seconds:
+            return []
+        return rows
+    finally:
+        if not vector_task.done():
+            vector_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await vector_task
 
 
 def _citation_text(citations: list[dict[str, object]]) -> str:
@@ -693,10 +809,18 @@ async def run_query(
         timer.log_summary()
         return result
 
-    vector_task = asyncio.create_task(
-        retriever_vector.retrieve_vector(effective_query, limit=vector_limit)
-    )
     try:
+        query_client = get_http_client(
+            base_url=settings.ollama_base_url,
+            timeout=settings.ollama_timeout,
+        )
+        with timer.measure("query_expand"):
+            expanded_queries = await query_expander.expand_query(
+                effective_query,
+                parsed,
+                query_client,
+            )
+
         with timer.measure("retrieve_exact"):
             exact = retriever_exact.retrieve_exact(
                 con,
@@ -704,29 +828,42 @@ async def run_query(
                 limit=max(20, settings.rerank_top_n * candidate_multiplier),
                 case_id=case_id,
             )
-        with timer.measure("retrieve_fts"):
-            fts = retriever_fts.retrieve_fts(
-                con,
-                effective_query,
-                limit=fts_limit,
-                case_id=case_id,
-            )
         with timer.measure("retrieve_graph"):
             graph = retriever_graph.retrieve_graph(
                 con, parsed["entities"], limit=graph_limit, case_id=case_id
             )
-        vector = await timer.await_stage("retrieve_vector", vector_task)
+        retrieval_queries = list(dict.fromkeys(expanded_queries))[:3]
+        if not retrieval_queries:
+            retrieval_queries = [effective_query]
+
+        with timer.measure("retrieve_fts_vector"):
+            fts_vector_rows: list[dict[str, object]] = []
+            for index, retrieval_query in enumerate(retrieval_queries):
+                timeout_seconds = None if index == 0 else QUERY_EXPANSION_TIME_BUDGET_SECONDS
+                query_rows = await _retrieve_query_rows(
+                    con,
+                    query_text=retrieval_query,
+                    case_id=case_id,
+                    fts_limit=fts_limit,
+                    vector_limit=vector_limit,
+                    timeout_seconds=timeout_seconds,
+                )
+                if query_rows:
+                    fts_vector_rows.extend(query_rows)
+            fts_vector_rows = _merge_rows_by_chunk_id(fts_vector_rows)
 
         if scoped_doc_ids:
             with timer.measure("document_filter"):
                 exact = _filter_rows_to_documents(exact, doc_ids=scoped_doc_ids)
-                fts = _filter_rows_to_documents(fts, doc_ids=scoped_doc_ids)
                 graph = _filter_rows_to_documents(graph, doc_ids=scoped_doc_ids)
-                vector = _filter_rows_to_documents(vector, doc_ids=scoped_doc_ids)
                 exact = _attach_document_names(exact, document_names=document_names)
-                fts = _attach_document_names(fts, document_names=document_names)
                 graph = _attach_document_names(graph, document_names=document_names)
-                vector = _attach_document_names(vector, document_names=document_names)
+                fts_vector_rows = _filter_rows_to_documents(
+                    fts_vector_rows, doc_ids=scoped_doc_ids
+                )
+                fts_vector_rows = _attach_document_names(
+                    fts_vector_rows, document_names=document_names
+                )
                 document_chunks = _document_chunk_rows(
                     con,
                     doc_ids=scoped_doc_ids,
@@ -738,22 +875,41 @@ async def run_query(
         if case_id:
             with timer.measure("case_doc_filter"):
                 allowed_doc_ids = get_doc_ids_for_case(con, case_id)
-                vector = [row for row in vector if row.get("doc_id") in allowed_doc_ids]
+                fts_vector_rows = [
+                    row for row in fts_vector_rows if row.get("doc_id") in allowed_doc_ids
+                ]
                 if document_chunks:
                     document_chunks = [
                         row for row in document_chunks if row.get("doc_id") in allowed_doc_ids
                     ]
 
+        with timer.measure("resolve_entities"):
+            entities_resolved = _resolve_entities(con, parsed["entities"])
+        if parsed.get("intent") == "connection_query":
+            parsed["resolved_entity_ids"] = [
+                str(entity.get("entity_id"))
+                for entity in entities_resolved
+                if entity.get("entity_id")
+            ]
+        cooccurrence = []
+        if parsed.get("intent") == "connection_query":
+            with timer.measure("retrieve_cooccurrence"):
+                cooccurrence = _cooccurrence_rows(
+                    con,
+                    entity_ids=list(parsed.get("resolved_entity_ids", [])),
+                    case_id=case_id,
+                )
+
         with timer.measure("rerank"):
-            ranked = reranker.rerank_results([*exact, *fts, *vector, *graph, *document_chunks])
+            ranked = reranker.rerank_results(
+                [*exact, *fts_vector_rows, *graph, *cooccurrence, *document_chunks]
+            )
             ranked = _with_document_coverage(
                 ranked,
                 top_n=settings.rerank_top_n,
                 min_doc_coverage=min_doc_coverage,
             )
 
-        with timer.measure("resolve_entities"):
-            entities_resolved = _resolve_entities(con, parsed["entities"])
         with timer.measure("build_evidence"):
             packet = evidence_builder.build_evidence_packet(
                 query_text=effective_query,
@@ -819,8 +975,4 @@ async def run_query(
             "top_results": ranked[:TOP_RESULTS_LIMIT],
         }
     finally:
-        if not vector_task.done():
-            vector_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await vector_task
         timer.log_summary()

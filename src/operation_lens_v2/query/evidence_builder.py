@@ -48,6 +48,17 @@ def build_evidence_packet(
         for row in ranked_results
         if row.get("source") == "exact"
     ]
+    link_candidates = [
+        {
+            "doc_id": row.get("doc_id"),
+            "page": row.get("page"),
+            "chunk_id": row.get("chunk_id"),
+            "span_text": row.get("text", ""),
+            "entity_pair": list(row.get("entity_pair", []))[:2],
+        }
+        for row in ranked_results
+        if row.get("source") == "cooccurrence"
+    ]
     chunks = [
         {
             "chunk_id": row.get("chunk_id"),
@@ -66,6 +77,7 @@ def build_evidence_packet(
         "case_scope": case_scope,
         "entities_resolved": entities_resolved,
         "relationships": relationships,
+        "link_candidates": link_candidates,
         "exact_matches": exact_matches[:30],
         "chunks": chunks[:20],
     }
