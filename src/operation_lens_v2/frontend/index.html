@@ -273,8 +273,22 @@
                       </div>
 
                       <div class="field-group">
+                        <span class="field-label">Investigation scope</span>
+                        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;">
+                          <label><input type="radio" name="query-scope" value="corpus" checked /> Corpus</label>
+                          <label><input type="radio" name="query-scope" value="case" /> Case</label>
+                          <label><input type="radio" name="query-scope" value="document" /> Document</label>
+                        </div>
+                      </div>
+
+                      <div class="field-group">
                         <label class="field-label" for="case-input">Case scope</label>
                         <input type="text" id="case-input" placeholder="e.g. OP_NIGHTFALL (optional)" />
+                      </div>
+
+                      <div class="field-group">
+                        <label class="field-label" for="doc-id-input">Document ID</label>
+                        <input type="text" id="doc-id-input" placeholder="e.g. doc-123 (for document scope)" />
                       </div>
 
                       <div class="field-group">

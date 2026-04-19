@@ -7,23 +7,17 @@ from operation_lens_v2.api.routes import audit, cases, graph, ingest, query, tim
 from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion import duck_store
 from operation_lens_v2.logging_utils import setup_logging
-from operation_lens_v2.runtime import close_runtime_resources
+from operation_lens_v2.runtime import close_runtime_resources, get_duck_connection
 
 setup_logging(settings.log_level)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Apply any pending schema migrations (idempotent ALTER TABLEs).
-    con = duck_store.connect(settings.duckdb_path)
-    try:
-        duck_store._ensure_case_columns(con)  # noqa: SLF001
-        duck_store._ensure_geocode_columns(con)  # noqa: SLF001
-        duck_store._ensure_attachments_table(con)  # noqa: SLF001
-        duck_store._ensure_temporal_columns(con)  # noqa: SLF001
-        duck_store._ensure_graph_indexes(con)  # noqa: SLF001
-    finally:
-        con.close()
+    # Ensure schema exists, then pin a shared runtime connection for request handlers.
+    init_con = duck_store.init_db(settings.duckdb_path)
+    init_con.close()
+    get_duck_connection(settings.duckdb_path)
     yield
     await close_runtime_resources()
 

@@ -1,14 +1,14 @@
 from fastapi import APIRouter
 
 from operation_lens_v2.config import settings
-from operation_lens_v2.ingestion.duck_store import connect
+from operation_lens_v2.runtime import get_duck_connection
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
 
 @router.get("/queries")
 def get_queries(limit: int = 50) -> dict[str, object]:
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     rows = con.execute(
         """
         SELECT query_id, query_text, intent, llm_backend, submitted_at

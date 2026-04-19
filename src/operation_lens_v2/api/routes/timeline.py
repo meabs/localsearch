@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter
 
 from operation_lens_v2.config import settings
-from operation_lens_v2.ingestion.duck_store import connect
+from operation_lens_v2.runtime import get_duck_connection
 
 router = APIRouter(prefix="/timeline", tags=["timeline"])
 
@@ -228,7 +228,7 @@ def timeline(
       entity   — filter to chunks mentioning this entity name (optional)
       limit    — max events to return (default 50)
     """
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     doc_id_list: list[str] | None = None
     if doc_ids:
         doc_id_list = [d.strip() for d in doc_ids.split(",") if d.strip()]

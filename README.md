@@ -63,8 +63,8 @@ Then open **http://127.0.0.1:8000/ui**.
 **Ingestion:** PDFs → text extraction → chunking → NER → alias normalization → relationship
 extraction → DuckDB evidence graph + LanceDB vector index.
 
-**Query:** question → intent parsing → exact / FTS / vector / graph retrieval → rerank → evidence
-packet → answer generation → claim validation against cited spans → grounded response.
+**Query:** question → scope selection (document / case / corpus) → intent parsing → either the
+investigator agent or the legacy retrieval path → grounded briefing with citations.
 
 ### Main capabilities
 
@@ -79,6 +79,7 @@ packet → answer generation → claim validation against cited spans → ground
 | Geocoding | Optional Nominatim lookups for locations |
 | Audit trail | Every query + answer persisted for review |
 | Browser UI | Served at `/ui`, no separate build step |
+| Investigator agent | Tool-using local agent for deeper corpus investigation |
 
 ---
 
@@ -89,7 +90,7 @@ flowchart TD
     UI["Browser UI (/ui)"] --> API["FastAPI"]
     API --> DB["DuckDB<br/>(entities, aliases, links, audits)"]
     API --> VDB["LanceDB<br/>(chunk embeddings)"]
-    API --> OLLAMA["Ollama<br/>(local models)"]
+    API --> OLLAMA["Ollama<br/>(local investigator, writer, extraction)"]
     API -. optional .-> OR["OpenRouter<br/>(cloud reasoning)"]
 ```
 
@@ -114,23 +115,23 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A["User question"] --> B["Intent parsing"]
-    B --> C["Exact / FTS retrieval"]
-    B --> D["Vector retrieval"]
-    B --> E["Graph retrieval"]
-    C --> F["Candidate merge"]
-    D --> F
-    E --> F
-    F --> G["Reranking"]
-    G --> H["Evidence packet"]
-    H --> I["Answer generation"]
-    I --> J["Claim validation"]
-    J --> K["Grounded response"]
+    A["User question + scope"] --> B["Intent parsing"]
+    B --> C["Investigator path"]
+    B --> D["Legacy retrieval path"]
+    C --> E["PydanticAI investigator<br/>tool loop over DuckDB/LanceDB"]
+    E --> F["Structured InvestigationReport"]
+    F --> G["Local writer model"]
+    D --> H["Exact / FTS / vector / graph retrieval"]
+    H --> I["Reranking + evidence packet"]
+    I --> J["Local answer generation"]
+    J --> K["Claim validation"]
+    G --> L["Grounded response"]
+    K --> L
 ```
 </details>
 
-**Data sovereignty:** DuckDB + LanceDB + Ollama all run on the local machine. Cloud reasoning via
-OpenRouter is opt-in and redacts span text before any external call.
+**Data sovereignty:** DuckDB + LanceDB + Ollama all run on the local machine. OpenRouter is only
+used when explicitly requested, and span text is redacted before any external call.
 
 ---
 
@@ -145,8 +146,10 @@ OpenRouter is opt-in and redacts span text before any external call.
 
 Recommended Ollama models (override in `config/.env` to match what you have):
 
-- Reasoning: `qwen3.5:32b-instruct-q4_K_M`
-- Extraction: `qwen3:8b-instruct-q4_K_M`
+- Local reasoning: `deepseek-r1:latest`
+- Investigator: `deepseek-r1:latest`
+- Writer: `deepseek-r1:latest`
+- Critic / extraction: `llama3.1:8b-instruct-q4_K_M`
 - Embedding: `nomic-embed-text`
 
 ---
@@ -294,7 +297,10 @@ The app loads settings from `config/.env`. Full defaults live in
 |---|---|
 | `OLLAMA_BASE_URL` | Base URL for the local Ollama server |
 | `OLLAMA_TIMEOUT` | Timeout for Ollama calls |
-| `LOCAL_REASONING_MODEL` | Answer generation |
+| `LOCAL_REASONING_MODEL` | Legacy local answer generation |
+| `INVESTIGATOR_MODEL` | Local tool-using investigator agent |
+| `WRITER_MODEL` | Local narrative briefing writer |
+| `CRITIC_MODEL` | Local lightweight critic / structured extraction helper |
 | `LOCAL_EXTRACTION_MODEL` | Claim extraction + relationship / entity tasks |
 | `LOCAL_EMBED_MODEL` | Embeddings |
 </details>
@@ -329,8 +335,9 @@ The app loads settings from `config/.env`. Full defaults live in
 | `OPENROUTER_API_KEY` | Required for OpenRouter use |
 | `OPENROUTER_BASE_URL` | Endpoint |
 | `OPENROUTER_MODEL` | Cloud model ID |
-| `PREFER_OPENROUTER_OUTPUT` | Prefer cloud answer when both available |
+| `PREFER_OPENROUTER_OUTPUT` | Keep `false` to prefer local Ollama output |
 
+OpenRouter is disabled by default and only used when a request explicitly enables cloud reasoning.
 Span text is redacted before any OpenRouter call.
 </details>
 
@@ -385,7 +392,7 @@ src/operation_lens_v2/
 ├── api/              FastAPI app, routes, request/response models
 │   └── routes/       ingest, query, graph, cases, timeline, audit
 ├── ingestion/        PDF extraction, chunking, NER, normalization, persistence
-├── query/            parsing, retrieval, rerank, evidence, answer, validation
+├── query/            parser, scope, tools, investigator, writer, retrieval, validation
 ├── services/         geocoder and other optional services
 ├── frontend/         browser UI served at /ui
 ├── runtime.py        shared resources (DuckDB, vector store, HTTP clients)

@@ -1,12 +1,14 @@
 const form = document.getElementById("query-form");
 const input = document.getElementById("query-input");
 const caseInput = document.getElementById("case-input");
+const docIdInput = document.getElementById("doc-id-input");
 const answer = document.getElementById("answer");
 const claims = document.getElementById("claims");
 const evidenceChunks = document.getElementById("evidence-chunks");
 const cloudToggle = document.getElementById("cloud-toggle");
 const templateSelect = document.getElementById("query-template-select");
 const recallModeSelect = document.getElementById("recall-mode-select");
+const scopeInputs = Array.from(document.querySelectorAll('input[name="query-scope"]'));
 const chatThread = document.getElementById("query-chat-thread");
 const chatResetButton = document.getElementById("chat-reset-btn");
 const submitButton = form ? form.querySelector("button[type='submit']") : null;
@@ -28,7 +30,21 @@ function formatAnswerText(rawAnswer) {
   if (!raw) {
     return '<div class="answer-empty">No answer generated.</div>';
   }
-  const sectionRe = /\b(PEOPLE|PLACES|ASSETS|KEY FINDINGS|CONFIDENCE POSTURE|CONFIDENCE|EVIDENCE GAPS|GAPS)\b/g;
+  const sectionNames = [
+    "ASSESSMENT",
+    "PEOPLE",
+    "PLACES",
+    "ASSETS",
+    "KEY FINDINGS",
+    "CROSS-DOCUMENT LINKS",
+    "TIMELINE",
+    "CONFIDENCE POSTURE",
+    "CONFIDENCE",
+    "EVIDENCE GAPS",
+    "GAPS",
+    "SUGGESTED NEXT ACTIONS",
+  ];
+  const sectionRe = new RegExp(`\\b(${sectionNames.join("|")})\\b`, "g");
   const withBreaks = raw.replace(sectionRe, "\n$1\n");
   const lines = withBreaks
     .split(/\n+/)
@@ -38,6 +54,7 @@ function formatAnswerText(rawAnswer) {
   let html = "";
   let currentTitle = "";
   let buffer = [];
+  const proseSections = new Set(["ASSESSMENT", "CONFIDENCE POSTURE"]);
 
   function flush() {
     if (!currentTitle) return;
@@ -51,6 +68,14 @@ function formatAnswerText(rawAnswer) {
       .map((line) => line.trim())
       .filter(Boolean);
 
+    if (proseSections.has(currentTitle)) {
+      const proseHtml = proseItems.length
+        ? proseItems.map((item) => `<p>${escapeHtml(item)}</p>`).join("")
+        : "<div class='answer-empty'>None identified.</div>";
+      html += `<section class="answer-section"><h4>${escapeHtml(currentTitle)}</h4>${proseHtml}</section>`;
+      return;
+    }
+
     let list = [];
     if (bulletItems.length) {
       list = [...bulletItems];
@@ -58,14 +83,8 @@ function formatAnswerText(rawAnswer) {
         list.push(...proseItems);
       }
     } else {
-      const text = proseItems.join(" ").trim();
-      list = text
-        .split(/\.\s+/)
-        .map((part) => part.trim())
-        .filter(Boolean)
-        .map((part) => (part.endsWith(".") ? part : `${part}.`));
+      list = proseItems;
     }
-
     const listHtml = list.length
       ? `<ul>${list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
       : "<div class='answer-empty'>None identified.</div>";
@@ -74,7 +93,7 @@ function formatAnswerText(rawAnswer) {
 
   for (const line of lines) {
     const normalizedLine = line.replace(/^#+\s*/, "").trim();
-    if (/^(PEOPLE|PLACES|ASSETS|KEY FINDINGS|CONFIDENCE POSTURE|CONFIDENCE|EVIDENCE GAPS|GAPS)$/i.test(normalizedLine)) {
+    if (sectionNames.includes(normalizedLine.toUpperCase())) {
       flush();
       currentTitle = normalizedLine.toUpperCase();
       buffer = [];
@@ -225,6 +244,11 @@ function buildChatHistoryPayload() {
   return chatTurns.map((turn) => ({ role: turn.role, content: turn.content }));
 }
 
+function getSelectedScope() {
+  const checked = scopeInputs.find((inputEl) => inputEl.checked);
+  return checked?.value || "corpus";
+}
+
 function focusEvidenceCard(key, snippet) {
   if (!evidenceChunks || !key) return;
   const cards = evidenceChunks.querySelectorAll(".evidence-card");
@@ -301,6 +325,8 @@ if (form) {
     const query = input.value.trim();
     if (!query) return;
     const caseRef = (caseInput?.value || "").trim();
+    const docId = (docIdInput?.value || "").trim();
+    const selectedScope = getSelectedScope();
     const priorChatHistory = buildChatHistoryPayload();
     pushChatTurn("user", query);
     if (inFlightController) {
@@ -332,6 +358,9 @@ if (form) {
         body: JSON.stringify({
           query,
           case_ref: caseRef || null,
+          case_scope: caseRef || null,
+          doc_id: docId || null,
+          scope: selectedScope,
           use_cloud: Boolean(cloudToggle?.checked),
           chat_history: priorChatHistory,
           recall_mode: recallModeSelect?.value || "auto",

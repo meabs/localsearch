@@ -19,6 +19,10 @@ from operation_lens_v2.query import (
     retriever_graph,
     retriever_vector,
 )
+from operation_lens_v2.query.investigator import investigate
+from operation_lens_v2.query.scope import ScopeContext, build_scope
+from operation_lens_v2.query.tool_schemas import InvestigationReport
+from operation_lens_v2.query.writer import compose_briefing
 from operation_lens_v2.runtime import StageTimer, get_duck_connection
 from operation_lens_v2.store import get_graph_backend
 
@@ -823,4 +827,113 @@ async def run_query(
             vector_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await vector_task
+        timer.log_summary()
+
+
+# ── Investigator-agent path ──────────────────────────────────────────────────
+
+
+def _claims_from_report(report: InvestigationReport) -> list[dict[str, object]]:
+    """Project atomic facts into the response-shape claims array."""
+    claims: list[dict[str, object]] = []
+    for fact in report.key_facts:
+        cite = fact.citation
+        claims.append(
+            {
+                "text": f"{fact.subject} {fact.predicate} {fact.object}".strip(),
+                "citations": [
+                    {
+                        "doc_id": cite.doc_id,
+                        "doc_name": cite.doc_name,
+                        "page": cite.page,
+                        "chunk_id": cite.chunk_id,
+                    }
+                ],
+                "confidence": float(fact.confidence),
+                "validated": True,
+            }
+        )
+    return claims
+
+
+async def run_investigator_query(
+    query_text: str,
+    *,
+    scope_mode: str,
+    doc_id: str | None = None,
+    case_scope: str | None = None,
+) -> dict[str, object]:
+    """Run a query through the PydanticAI investigator agent and writer.
+
+    Returns a response shaped the same as `run_query` so the existing frontend can
+    consume either path. Scope is enforced at the tool layer; see query/scope.py.
+    """
+    timer = StageTimer(label=f"investigator:{query_text[:80]}")
+    con = get_duck_connection(settings.duckdb_path)
+
+    with timer.measure("build_scope"):
+        scope: ScopeContext = build_scope(
+            scope_mode,
+            doc_id=doc_id,
+            case_scope=case_scope,
+        )
+
+    try:
+        with timer.measure("investigate"):
+            report = await investigate(query_text, scope, con)
+        with timer.measure("compose_briefing"):
+            answer = await compose_briefing(report, query_text)
+
+        query_id = str(uuid4())
+        case_scope_label = (
+            case_scope
+            if scope.mode.value == "case"
+            else ("DOCUMENT:" + doc_id if scope.mode.value == "document" and doc_id else "ALL_CASES")
+        )
+        claims = _claims_from_report(report)
+
+        with timer.measure("persist_answer"):
+            con.execute(
+                (
+                    "INSERT INTO queries "
+                    "(query_id, query_text, intent, llm_backend) "
+                    "VALUES (?, ?, ?, ?)"
+                ),
+                [query_id, query_text, "investigator_agent", "local-investigator"],
+            )
+            for claim in claims:
+                con.execute(
+                    """
+                    INSERT INTO answer_spans (
+                      span_id, query_id, claim_text, supporting_evidence, confidence, validated
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        str(uuid4()),
+                        query_id,
+                        claim["text"],
+                        [f"{c['doc_id']}:{c['page']}" for c in claim["citations"]],
+                        claim["confidence"],
+                        True,
+                    ],
+                )
+
+        return {
+            "query_id": query_id,
+            "intent": "investigator_agent",
+            "entities": [],
+            "entities_resolved": [],
+            "case_scope": case_scope_label,
+            "backend": "local-investigator",
+            "recall_mode": "investigator",
+            "scope": scope.mode.value,
+            "scope_label": scope.describe(),
+            "answer": answer,
+            "claims": claims,
+            "report": report.model_dump(),
+            "result_count": len(report.key_facts),
+            "top_results": [],
+        }
+    finally:
         timer.log_summary()

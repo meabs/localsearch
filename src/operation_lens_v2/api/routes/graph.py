@@ -10,8 +10,9 @@ from fastapi.responses import FileResponse
 
 from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion import duck_store
-from operation_lens_v2.ingestion.duck_store import connect, get_case_id_by_ref
+from operation_lens_v2.ingestion.duck_store import get_case_id_by_ref
 from operation_lens_v2.ingestion.entity_schema import get_schema
+from operation_lens_v2.runtime import get_duck_connection
 from operation_lens_v2.services.geocoder import GeocoderDisabled, geocode_entity
 from operation_lens_v2.services.graph_algorithms import (
     centrality_report,
@@ -175,7 +176,7 @@ def _load_edge_citations(con, rel_ids: list[str]) -> dict[str, list[dict[str, ob
 
 @router.get("/entities")
 def entities(limit: int = 100) -> dict[str, object]:
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     rows = con.execute(
         "SELECT entity_id, canonical_name, entity_type, mention_count FROM entities LIMIT ?",
         [limit],
@@ -195,7 +196,7 @@ def entities(limit: int = 100) -> dict[str, object]:
 
 @router.get("/network")
 def network(limit: int = 300, entity: str | None = None, hops: int = 2) -> dict[str, object]:
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     focus_node_ids: list[str] = []
     if entity:
         entity_norm = entity.strip().lower()
@@ -405,7 +406,7 @@ def locations(case_ref: str | None = None, limit: int = 500) -> dict[str, object
     Joins entities → entity_aliases → documents to collect which documents
     each location appears in, so pins can expand into source references.
     """
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     if case_ref:
         rows = con.execute(
             """
@@ -480,7 +481,7 @@ def locations(case_ref: str | None = None, limit: int = 500) -> dict[str, object
 @router.get("/entity/{entity_id}/geocode")
 async def entity_geocode(entity_id: str, force: bool = False) -> dict[str, object]:
     """Return cached geocode for an entity, or resolve on-demand via Nominatim."""
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     row = con.execute(
         "SELECT canonical_name, entity_type FROM entities WHERE entity_id = ?",
         [entity_id],
@@ -519,7 +520,7 @@ async def entity_geocode(entity_id: str, force: bool = False) -> dict[str, objec
 @router.get("/entity/{entity_id}/attachments")
 def list_entity_attachments(entity_id: str) -> dict[str, object]:
     """List photo attachments linked to an entity."""
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     row = con.execute(
         "SELECT canonical_name, entity_type FROM entities WHERE entity_id = ?",
         [entity_id],
@@ -538,7 +539,7 @@ def list_entity_attachments(entity_id: str) -> dict[str, object]:
 @router.get("/entity/{entity_id}/profile")
 def entity_profile(entity_id: str, timeline_limit: int = 30) -> dict[str, object]:
     """Return one entity profile with aliases, links, docs, timeline, and attachments."""
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     entity = con.execute(
         """
         SELECT entity_id, canonical_name, entity_type, mention_count, confidence,
@@ -672,7 +673,7 @@ async def upload_entity_attachment(
     caption: str | None = None,
 ) -> dict[str, object]:
     """Store an image attachment under data/attachments/{entity_id}/."""
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     row = con.execute(
         "SELECT 1 FROM entities WHERE entity_id = ?",
         [entity_id],
@@ -723,7 +724,7 @@ async def upload_entity_attachment(
 @router.get("/attachments/{attachment_id}")
 def get_attachment_file(attachment_id: str) -> FileResponse:
     """Serve attachment bytes from local disk."""
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     attachment = duck_store.get_attachment(con, attachment_id)
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
@@ -739,7 +740,7 @@ def get_attachment_file(attachment_id: str) -> FileResponse:
 @router.get("/entity/{entity_id}/vehicle-track")
 def vehicle_track(entity_id: str) -> dict[str, object]:
     """Build an ANPR-style track for VEHICLE nodes from observed-at evidence."""
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     vehicle_row = con.execute(
         "SELECT canonical_name, entity_type FROM entities WHERE entity_id = ?",
         [entity_id],
@@ -873,7 +874,7 @@ def path(
     Constraints (`min_confidence`, `exclude_relation_types`) trim the graph
     before traversal so pathfinding avoids noise edges (e.g. MENTIONED_WITH).
     """
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     backend = DuckDBGraphBackend(con)
     source_id = backend.resolve_entity_id(source)
     target_id = backend.resolve_entity_id(target)
@@ -922,7 +923,7 @@ def expand(
     case_ref: str | None = None,
 ) -> dict[str, object]:
     """One-hop expansion around a node. Accepts entity_id OR a name/alias."""
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     backend = DuckDBGraphBackend(con)
     resolved = backend.resolve_entity_id(entity_id)
     if not resolved:
@@ -954,7 +955,7 @@ def centrality(
     case_ref: str | None = None,
 ) -> dict[str, object]:
     """Rank entities by degree / betweenness / pagerank centrality."""
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     backend = DuckDBGraphBackend(con)
     edge_filter = _edge_filter_from_query(
         con,
@@ -980,7 +981,7 @@ def communities(
     case_ref: str | None = None,
 ) -> dict[str, object]:
     """Louvain community detection. `resolution`>1 fragments more aggressively."""
-    con = connect(settings.duckdb_path)
+    con = get_duck_connection(settings.duckdb_path)
     backend = DuckDBGraphBackend(con)
     edge_filter = _edge_filter_from_query(
         con,

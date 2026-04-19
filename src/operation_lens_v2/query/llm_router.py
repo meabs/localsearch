@@ -676,10 +676,9 @@ async def generate_answer(
 
         fallback_lines, claims = _deterministic_relationship_lines(evidence_packet, top_findings)
 
-        if settings.prefer_openrouter_output and openrouter_analysis:
-            answer = openrouter_analysis
-            backend_used = f"openrouter:{settings.openrouter_model}"
-        elif local_analysis:
+        # Prefer the local Ollama result whenever it succeeds. Cloud output is only a
+        # fallback when explicitly enabled and the local path fails or returns empty.
+        if local_analysis:
             answer = local_analysis
             backend_used = settings.local_reasoning_model
         elif openrouter_analysis:

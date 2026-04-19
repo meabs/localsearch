@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     )
     local_embed_model: str = Field(default="nomic-embed-text", alias="LOCAL_EMBED_MODEL")
 
+    # Investigator agent models (tool-calling loop + briefing writer + critic)
+    investigator_model: str = Field(
+        default="qwen2.5:14b-instruct-q4_K_M", alias="INVESTIGATOR_MODEL"
+    )
+    writer_model: str = Field(default="qwen2.5:32b-instruct-q4_K_M", alias="WRITER_MODEL")
+    critic_model: str = Field(default="qwen2.5:7b-instruct-q4_K_M", alias="CRITIC_MODEL")
+    investigator_max_iterations: int = Field(default=10, alias="INVESTIGATOR_MAX_ITERATIONS")
+    investigator_timeout: float = Field(default=180.0, alias="INVESTIGATOR_TIMEOUT")
+
     # ── Embeddings ────────────────────────────────────────────────────────────
     embed_dim: int = Field(default=768, alias="EMBED_DIM")
     embed_batch_size: int = Field(default=32, alias="EMBED_BATCH_SIZE")
