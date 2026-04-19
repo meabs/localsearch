@@ -19,6 +19,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from operation_lens_v2.ingestion.duck_store import init_db
 from operation_lens_v2.query.investigator import (
     InvestigatorDeps,
+    _select_tool_capable_investigator_model,
     build_investigator,
     investigate,
 )
@@ -256,3 +257,75 @@ def test_agent_has_all_nine_tools():
     registered = set(toolset.tools.keys()) if hasattr(toolset, "tools") else set()
     missing = expected - registered
     assert not missing, f"missing tools on agent: {missing}"
+
+
+def test_select_tool_capable_investigator_model_prefers_installed_fallback(monkeypatch):
+    from operation_lens_v2.query import investigator as investigator_mod
+
+    monkeypatch.setattr(
+        investigator_mod,
+        "_list_ollama_models",
+        lambda settings: {"deepseek-r1:latest", "gpt-oss:20b", "nomic-embed-text"},
+    )
+
+    selected = _select_tool_capable_investigator_model(investigator_mod.default_settings)
+    assert selected == "gpt-oss:20b"
+
+
+@pytest.mark.asyncio
+async def test_investigate_retries_with_tool_capable_model(monkeypatch, seeded_db):
+    from operation_lens_v2.query import investigator as investigator_mod
+
+    class _Result:
+        def __init__(self, output):
+            self.output = output
+
+    class _FailingAgent:
+        async def run(self, query, deps, usage_limits):
+            raise RuntimeError("model does not support tools")
+
+    class _WorkingAgent:
+        async def run(self, query, deps, usage_limits):
+            return _Result(
+                InvestigationReport(
+                    hypothesis="Recovered with a tool-capable model.",
+                    key_facts=[
+                        AtomicFact(
+                            subject="Marcus Webb",
+                            predicate="was interviewed in",
+                            object="NF-INT-001",
+                            confidence=0.9,
+                            citation=Citation(
+                                doc_id="doc-webb",
+                                doc_name="NF-INT-001.pdf",
+                                page=1,
+                            ),
+                        )
+                    ],
+                    confidence="HIGH",
+                    gaps=[],
+                    next_actions=[],
+                )
+            )
+
+    def _build_agent(settings=None):
+        model_name = (settings or investigator_mod.default_settings).investigator_model
+        if model_name == "deepseek-r1:latest":
+            return _FailingAgent()
+        return _WorkingAgent()
+
+    monkeypatch.setattr(investigator_mod, "build_investigator", _build_agent)
+    monkeypatch.setattr(
+        investigator_mod,
+        "_select_tool_capable_investigator_model",
+        lambda settings: "gpt-oss:20b",
+    )
+
+    report = await investigate(
+        "What connects Marcus Webb to NF-INT-001?",
+        build_scope("corpus"),
+        seeded_db["con"],
+    )
+
+    assert report.confidence == "HIGH"
+    assert report.hypothesis == "Recovered with a tool-capable model."

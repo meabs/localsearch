@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import duckdb
+import httpx
 
 from operation_lens_v2.config import Settings, settings as default_settings
 from operation_lens_v2.query import tools
@@ -37,6 +38,11 @@ logger = logging.getLogger(__name__)
 Agent = Any
 RunContext = Any
 OpenAIChatModel = Any
+TOOL_CAPABLE_MODEL_CANDIDATES = (
+    "gpt-oss:20b",
+    "gemma4:26b",
+    "glm-4.7-flash:latest",
+)
 
 
 @dataclass
@@ -57,6 +63,47 @@ def _build_model(settings: Settings) -> OpenAIChatModel:
         api_key="ollama",
     )
     return OpenAIChatModel(settings.investigator_model, provider=provider)
+
+
+def _is_tool_support_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "does not support tools" in message or "support tools" in message
+
+
+def _list_ollama_models(settings: Settings) -> set[str]:
+    """Return installed Ollama model tags, or an empty set if Ollama is unavailable."""
+    try:
+        with httpx.Client(
+            base_url=settings.ollama_base_url.rstrip("/"),
+            timeout=min(settings.ollama_timeout, 15.0),
+        ) as client:
+            response = client.get("/api/tags")
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:
+        logger.warning("Unable to list Ollama models for investigator fallback: %s", exc)
+        return set()
+
+    models = payload.get("models", [])
+    installed: set[str] = set()
+    for model in models:
+        name = str(model.get("name") or "").strip()
+        if name:
+            installed.add(name)
+    return installed
+
+
+def _select_tool_capable_investigator_model(settings: Settings) -> str | None:
+    """Pick a local Ollama model that supports tool calling for the investigator."""
+    installed = _list_ollama_models(settings)
+    if not installed:
+        return None
+    if settings.investigator_model in installed and settings.investigator_model in TOOL_CAPABLE_MODEL_CANDIDATES:
+        return settings.investigator_model
+    for candidate in TOOL_CAPABLE_MODEL_CANDIDATES:
+        if candidate in installed:
+            return candidate
+    return None
 
 
 def _scope_guard(tool_name: str):
@@ -219,17 +266,39 @@ async def investigate(
     returns a low-confidence report rather than raising — the router falls back to
     the deterministic path in that case.
     """
-    agent = build_investigator(settings)
-    deps = InvestigatorDeps(scope=scope, duck=duck)
     try:
         from pydantic_ai.usage import UsageLimits
     except ImportError as exc:
         raise RuntimeError("pydantic-ai-slim is not installed in the active environment.") from exc
 
+    agent = build_investigator(settings)
+    deps = InvestigatorDeps(scope=scope, duck=duck)
     limits = UsageLimits(request_limit=settings.investigator_max_iterations)
     try:
         result = await agent.run(query, deps=deps, usage_limits=limits)
     except Exception as exc:
+        if _is_tool_support_error(exc):
+            fallback_model = _select_tool_capable_investigator_model(settings)
+            if fallback_model and fallback_model != settings.investigator_model:
+                logger.warning(
+                    "Investigator model %s does not support tools; retrying with %s",
+                    settings.investigator_model,
+                    fallback_model,
+                )
+                fallback_settings = settings.model_copy(
+                    update={"investigator_model": fallback_model}
+                )
+                fallback_agent = build_investigator(fallback_settings)
+                try:
+                    result = await fallback_agent.run(query, deps=deps, usage_limits=limits)
+                    return result.output
+                except Exception as fallback_exc:
+                    logger.warning(
+                        "Investigator fallback model %s also failed: %s",
+                        fallback_model,
+                        fallback_exc,
+                    )
+                    exc = fallback_exc
         logger.warning("Investigator agent failed: %s", exc)
         return InvestigationReport(
             hypothesis="Investigator agent failed to complete the investigation.",
