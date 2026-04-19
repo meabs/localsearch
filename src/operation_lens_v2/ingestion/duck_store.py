@@ -9,7 +9,6 @@ import duckdb
 from operation_lens_v2.models import Chunk, RelationshipCandidate
 
 logger = logging.getLogger(__name__)
-_fts_extension_ready = False
 
 
 SCHEMA_SQL = """
@@ -103,13 +102,18 @@ CREATE TABLE IF NOT EXISTS answer_spans (
 
 
 def connect(path: str) -> duckdb.DuckDBPyConnection:
-    global _fts_extension_ready
+    """Open a DuckDB connection and ensure the FTS extension is loaded.
+
+    INSTALL is idempotent at the DuckDB level — no process-wide flag needed,
+    which also avoids a race across threads/processes sharing the database file.
+    """
     db_path = Path(path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(db_path))
-    if not _fts_extension_ready:
+    try:
         con.execute("INSTALL fts;")
-        _fts_extension_ready = True
+    except duckdb.Error as exc:
+        logger.debug("INSTALL fts no-op/failure (likely already installed): %s", exc)
     con.execute("LOAD fts;")
     return con
 

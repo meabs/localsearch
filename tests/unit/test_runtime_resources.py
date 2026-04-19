@@ -22,7 +22,14 @@ class _FakeResponse:
         return self._payload
 
 
-def test_connect_installs_fts_only_once(monkeypatch) -> None:
+def test_connect_always_loads_fts(monkeypatch) -> None:
+    """Each connect issues INSTALL (idempotent in DuckDB) and LOAD.
+
+    The old implementation used a process-wide `_fts_extension_ready` flag to
+    skip INSTALL after the first connect; that global was removed because
+    INSTALL is already idempotent at the DuckDB level and the flag introduced
+    a race across threads/processes sharing the db file.
+    """
     executed_sql: list[str] = []
 
     class FakeConnection:
@@ -33,13 +40,12 @@ def test_connect_installs_fts_only_once(monkeypatch) -> None:
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(duck_store, "_fts_extension_ready", False)
     monkeypatch.setattr(duck_store.duckdb, "connect", lambda _: FakeConnection())
 
     duck_store.connect("data/test-one.duckdb")
     duck_store.connect("data/test-two.duckdb")
 
-    assert executed_sql.count("INSTALL fts;") == 1
+    assert executed_sql.count("INSTALL fts;") == 2
     assert executed_sql.count("LOAD fts;") == 2
 
 

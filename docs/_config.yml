@@ -1,0 +1,14 @@
+title: Operation Lens v2
+description: Local-first PDF intelligence analysis with evidence-backed answers.
+theme: jekyll-theme-minimal
+show_downloads: false
+
+# Enable Mermaid diagrams (GitHub Pages renders these via the minimal theme + kramdown)
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+# Keep build output tidy
+exclude:
+  - README.md

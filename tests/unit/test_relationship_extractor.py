@@ -112,6 +112,57 @@ async def test_llm_stage_handles_json_parse_failure_gracefully():
 
 
 @pytest.mark.asyncio
+async def test_llm_span_offsets_valid_when_span_missing_from_truncation():
+    """If the LLM's span can't be located, offsets must be 0/0 — never -1 coerced.
+
+    Regression: text.find() returning -1 used to be coerced by `if span_start >= 0`
+    into an invalid span_start=0, span_end=len(span) pair.
+    """
+    from operation_lens_v2.ingestion.relationship_extractor import _run_llm_stage
+
+    hallucinated_span = "this exact string is not present anywhere in the input"
+    fake_response = (
+        f'[{{"source": "A", "target": "B", "relation_type": "LINKED_TO", '
+        f'"span_text": "{hallucinated_span}", "confidence": 0.5}}]'
+    )
+    entities = [_ent("A"), _ent("B")]
+    input_text = "Totally unrelated sentence about A and B."
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value.raise_for_status = lambda: None
+        mock_post.return_value.json = lambda: {"response": fake_response}
+        rels = await _run_llm_stage(input_text, entities)
+
+    assert len(rels) == 1
+    rel = rels[0]
+    # Unlocatable span → sentinel zeros, not a bogus positive offset.
+    assert rel.span_start == 0
+    assert rel.span_end == 0
+
+
+@pytest.mark.asyncio
+async def test_llm_span_offsets_valid_when_span_present():
+    from operation_lens_v2.ingestion.relationship_extractor import _run_llm_stage
+
+    input_text = "Alpha worked with Bravo on the job."
+    located_span = "Alpha worked with Bravo"
+    fake_response = (
+        f'[{{"source": "Alpha", "target": "Bravo", "relation_type": "ASSOCIATED_WITH", '
+        f'"span_text": "{located_span}", "confidence": 0.7}}]'
+    )
+    entities = [_ent("Alpha"), _ent("Bravo")]
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value.raise_for_status = lambda: None
+        mock_post.return_value.json = lambda: {"response": fake_response}
+        rels = await _run_llm_stage(input_text, entities)
+
+    assert len(rels) == 1
+    rel = rels[0]
+    assert rel.span_start == input_text.index(located_span)
+    assert rel.span_end == rel.span_start + len(located_span)
+    assert input_text[rel.span_start:rel.span_end] == located_span
+
+
+@pytest.mark.asyncio
 async def test_llm_confidence_is_clamped():
     from operation_lens_v2.config import settings
     from operation_lens_v2.ingestion.relationship_extractor import _run_llm_stage

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from threading import Lock
+from typing import Any
 
 from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion.entity_schema import get_schema
@@ -31,31 +32,48 @@ def _build_label_map() -> dict[str, str]:
     return m
 
 
-_model = None
-_model_lock = Lock()
+class _GLiNERLoader:
+    """Thread-safe lazy loader for the GLiNER model.
 
+    Replaces a module-level `global _model`. The loader owns its own state;
+    callers receive the model via `load()` / `get()` and never touch globals.
+    `MemoryError` propagates — we never swallow OOM.
+    """
 
-def load_gliner_model():
-    """Load GLiNER model once. Thread-safe. Caller may cache the returned instance."""
-    global _model
-    with _model_lock:
-        if _model is None:
-            try:
+    def __init__(self) -> None:
+        self._model: Any = None
+        self._lock = Lock()
+
+    def load(self) -> Any:
+        with self._lock:
+            if self._model is None:
                 from gliner import GLiNER  # type: ignore[import]
 
                 logger.info("Loading GLiNER model: %s", settings.gliner_model)
-                _model = GLiNER.from_pretrained(settings.gliner_model)
+                self._model = GLiNER.from_pretrained(settings.gliner_model)
                 logger.info("GLiNER model loaded.")
-            except Exception as exc:
-                logger.error("Failed to load GLiNER model %s: %s", settings.gliner_model, exc)
-                raise
-    return _model
+            return self._model
+
+    def get(self) -> Any:
+        if self._model is None:
+            return self.load()
+        return self._model
+
+    def reset(self) -> None:
+        with self._lock:
+            self._model = None
 
 
-def _get_model():
-    if _model is None:
-        return load_gliner_model()
-    return _model
+_loader = _GLiNERLoader()
+
+
+def load_gliner_model() -> Any:
+    """Load GLiNER model (thread-safe, cached). Returns the model instance."""
+    return _loader.load()
+
+
+def _get_model() -> Any:
+    return _loader.get()
 
 
 def _merge_overlapping(entities: list[ExtractedEntity]) -> list[ExtractedEntity]:
@@ -78,8 +96,13 @@ def extract_general_entities(text: str) -> list[ExtractedEntity]:
     """Extract general named entities using GLiNER, with labels sourced from the schema."""
     try:
         model = _get_model()
-    except Exception:
-        logger.warning("GLiNER unavailable — skipping general NER for this chunk.")
+    except (ImportError, ModuleNotFoundError) as exc:
+        logger.warning("GLiNER not installed (%s) — skipping general NER.", exc)
+        return []
+    except (OSError, RuntimeError) as exc:
+        # Model-weight download/load failure — degrade for this chunk.
+        # MemoryError is deliberately NOT caught here: spec requires OOM to surface.
+        logger.warning("GLiNER load failed (%s) — skipping general NER for this chunk.", exc)
         return []
 
     label_map = _build_label_map()
@@ -90,7 +113,8 @@ def extract_general_entities(text: str) -> list[ExtractedEntity]:
     labels = sorted(label_map.keys())
     try:
         raw = model.predict_entities(text, labels, threshold=settings.gliner_threshold)
-    except Exception as exc:
+    except (ValueError, RuntimeError) as exc:
+        # Runtime includes torch inference failures. MemoryError still propagates.
         logger.warning("GLiNER prediction failed: %s", exc)
         return []
 

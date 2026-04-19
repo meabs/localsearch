@@ -31,6 +31,17 @@ class Settings(BaseSettings):
 
     # ── Embeddings ────────────────────────────────────────────────────────────
     embed_dim: int = Field(default=768, alias="EMBED_DIM")
+    embed_batch_size: int = Field(default=32, alias="EMBED_BATCH_SIZE")
+    embed_retry_attempts: int = Field(default=3, alias="EMBED_RETRY_ATTEMPTS")
+    embed_retry_backoff: float = Field(default=2.0, alias="EMBED_RETRY_BACKOFF")
+
+    # ── LLM router limits ─────────────────────────────────────────────────────
+    openrouter_citation_limit: int = Field(default=3, alias="OPENROUTER_CITATION_LIMIT")
+    openrouter_findings_limit: int = Field(default=10, alias="OPENROUTER_FINDINGS_LIMIT")
+    local_findings_limit: int = Field(default=8, alias="LOCAL_FINDINGS_LIMIT")
+    relationship_findings_limit: int = Field(default=8, alias="RELATIONSHIP_FINDINGS_LIMIT")
+    exact_findings_limit: int = Field(default=10, alias="EXACT_FINDINGS_LIMIT")
+    chunk_findings_limit: int = Field(default=6, alias="CHUNK_FINDINGS_LIMIT")
 
     # ── GLiNER ────────────────────────────────────────────────────────────────
     gliner_model: str = Field(default="urchade/gliner_large-v2.1", alias="GLINER_MODEL")

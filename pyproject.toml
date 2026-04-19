@@ -17,6 +17,7 @@ dependencies = [
   "python-dotenv>=1.0.1",
   "rapidfuzz>=3.10.0",
   "spacy>=3.7.6",
+  "tiktoken>=0.8.0",
   "uvicorn>=0.30.6",
 ]
 

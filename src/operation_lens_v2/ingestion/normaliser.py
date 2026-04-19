@@ -100,14 +100,34 @@ _STRATEGIES = {
 
 
 def normalise(surface: str, entity_type: str) -> str:
-    """Normalise a surface form for the given entity type."""
+    """Normalise a surface form for the given entity type.
+
+    An unknown `entity_type` logs a warning and degrades to trim, rather than
+    silently using the default strategy — typos should be visible.
+    """
     raw = (surface or "").strip()
     if not raw:
         return raw
     schema = get_schema()
     type_def = schema.entity_types.get(entity_type)
-    rule = type_def.normalise if type_def else NormaliseRule()
-    handler = _STRATEGIES.get(rule.strategy, _strategy_trim)
+    if type_def is None:
+        known = sorted(schema.entity_types.keys())
+        logger.warning(
+            "Normalise: unknown entity_type %r — falling back to trim. Known types: %s",
+            entity_type,
+            known,
+        )
+        rule = NormaliseRule()
+    else:
+        rule = type_def.normalise
+    handler = _STRATEGIES.get(rule.strategy)
+    if handler is None:
+        logger.warning(
+            "Normalise: unknown strategy %r for type %s — using trim.",
+            rule.strategy,
+            entity_type,
+        )
+        handler = _strategy_trim
     try:
         return handler(raw, rule)
     except Exception as exc:

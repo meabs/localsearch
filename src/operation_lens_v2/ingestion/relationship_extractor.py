@@ -66,6 +66,9 @@ def _strip_markdown_fences(text: str) -> str:
     return text.strip()
 
 
+_LLM_INPUT_CHAR_LIMIT = 2000
+
+
 async def _run_llm_stage(text: str, entities: list[ExtractedEntity]) -> list[RelationshipCandidate]:
     """Stage 2: use the extraction model to propose typed relationships as JSON."""
     if not entities:
@@ -78,6 +81,7 @@ async def _run_llm_stage(text: str, entities: list[ExtractedEntity]) -> list[Rel
         if schema.relation_hints
         else "any UPPER_SNAKE_CASE label"
     )
+    truncated_text = text[:_LLM_INPUT_CHAR_LIMIT]
     prompt = (
         "You are an information extraction system. Extract typed relationships from the text.\n"
         "Return a JSON array only — no prose, no markdown fences.\n"
@@ -87,7 +91,7 @@ async def _run_llm_stage(text: str, entities: list[ExtractedEntity]) -> list[Rel
         "(max 40 characters). Do NOT invent types for convenience.\n"
         f"confidence must be a float between 0.1 and 0.95.\n\n"
         f"Known entities: {', '.join(entity_list)}\n\n"
-        f"Text:\n{text[:2000]}\n\n"
+        f"Text:\n{truncated_text}\n\n"
         "JSON array:"
     )
 
@@ -125,16 +129,27 @@ async def _run_llm_stage(text: str, entities: list[ExtractedEntity]) -> list[Rel
         raw_conf = float(item.get("confidence", 0.5))
         confidence = max(settings.llm_confidence_min, min(settings.llm_confidence_max, raw_conf))
         span = str(item.get("span_text", ""))
-        span_start = text.find(span) if span else 0
-        span_end = span_start + len(span) if span_start >= 0 else 0
+        # Locate the span in the original text. The LLM only ever saw `truncated_text`,
+        # so fall back to that window before declaring the span absent. If neither
+        # contains it, record the span text but leave offsets at 0 (sentinel for
+        # "unlocatable") rather than coercing an invalid -1 to a real offset.
+        span_start = text.find(span) if span else -1
+        if span and span_start < 0:
+            span_start = truncated_text.find(span)
+        if span and span_start >= 0:
+            span_end = span_start + len(span)
+        else:
+            span_start = 0
+            span_end = 0
+        fallback_text = text[:100] if text else ""
         out.append(
             RelationshipCandidate(
                 source=str(item.get("source", "")),
                 target=str(item.get("target", "")),
                 relation_type=rtype,
-                span_text=span or text[:100],
-                span_start=max(0, span_start),
-                span_end=max(0, span_end),
+                span_text=span or fallback_text,
+                span_start=span_start,
+                span_end=span_end,
                 confidence=confidence,
                 extraction_method="llm",
             )
