@@ -79,7 +79,7 @@ def deterministic_briefing(report: InvestigationReport) -> str:
     if report.key_facts:
         for fact in report.key_facts[:6]:
             cite = fact.citation
-            cite_str = f"[{cite.doc_id}, p.{cite.page}]"
+            cite_str = f"[{_cite_label(cite)}, p.{cite.page}]"
             lines.append(f"- {fact.subject} {fact.predicate} {fact.object} {cite_str}")
     else:
         lines.append("- No supported findings.")
@@ -93,7 +93,7 @@ def deterministic_briefing(report: InvestigationReport) -> str:
                 for edge in path.edges
             )
             cite = path.citations[0] if path.citations else None
-            cite_str = f"[{cite.doc_id}, p.{cite.page}]" if cite else "[uncited]"
+            cite_str = f"[{_cite_label(cite)}, p.{cite.page}]" if cite else "[uncited]"
             lines.append(f"- {summary} {cite_str}")
         lines.append("")
 
@@ -101,7 +101,7 @@ def deterministic_briefing(report: InvestigationReport) -> str:
         lines.append("TIMELINE")
         for event in report.timeline[:8]:
             cite = event.citation()
-            cite_str = f"[{cite.doc_id}, p.{cite.page}]" if cite else "[uncited]"
+            cite_str = f"[{_cite_label(cite)}, p.{cite.page}]" if cite else "[uncited]"
             lines.append(f"- {event.event_time}: {event.text} {cite_str}")
         lines.append("")
 
@@ -123,6 +123,16 @@ def deterministic_briefing(report: InvestigationReport) -> str:
         lines.append("- None reported.")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _cite_label(cite) -> str:
+    """Prefer the human-readable doc_name; fall back to doc_id."""
+    if cite is None:
+        return "uncited"
+    name = getattr(cite, "doc_name", None)
+    if name:
+        return str(name)
+    return str(getattr(cite, "doc_id", "unknown"))
 
 
 def _looks_like_briefing(text: str) -> bool:

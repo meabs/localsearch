@@ -3,19 +3,22 @@
   const detail = document.getElementById("node-detail");
   const form = document.getElementById("graph-form");
   const input = document.getElementById("graph-entity-input");
+  const caseSelect = document.getElementById("graph-case-select");
   if (!cyRoot || !detail) return;
 
   let cy = null;
   let detailRequestSeq = 0;
+  // The Atlas tracks its own case selection so operators can switch between
+  // ingested operations (or pick "All operations") without leaving the graph
+  // view. `null` means "follow whatever case_manager.js picked globally" so
+  // the first render after boot still lines up with the Cases desk.
+  let atlasCaseOverride = null;
+  let knownAtlasCases = [];
   // Colours come from the backend schema (first-party) with a deterministic
-  // HSL hash fallback — any new entity type gets a stable colour automatically.
+  // HSL hash fallback - any new entity type gets a stable colour automatically.
   const FALLBACK_COLOR = "#5b6b7d";
   const colorCache = Object.create(null);
   let schemaColors = Object.create(null);
-
-  function setGraphStatus(message) {
-    cyRoot.innerHTML = `<div class="timeline-empty">${escHtml(message)}</div>`;
-  }
 
   function apiUrl(path) {
     const explicit = window.LENS_API_BASE;
@@ -61,7 +64,7 @@
       });
       schemaColors = next;
     } catch (_) {
-      // Offline or schema route missing — fallback hash colours still work.
+      // Offline or schema route missing - fallback hash colours still work.
     }
   }
 
@@ -412,10 +415,58 @@
     renderAttachments(detail, node);
   }
 
-  async function loadNetwork(entityName = "", options = {}) {
-    setGraphStatus(entityName ? `Loading network for ${entityName}...` : "Loading graph overview...");
-    const q = entityName ? `?entity=${encodeURIComponent(entityName)}&hops=2&limit=100` : "?limit=60";
-    const resp = await fetch(apiUrl(`/graph/network${q}`));
+  function globalCaseRef() {
+    const value = window.__lensSelectedCaseRef;
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  function activeCaseRef() {
+    // An explicit picker choice (including the empty "All operations"
+    // option) always wins over the global case. Before the user touches the
+    // picker we mirror whatever Cases desk is pointing at so the two views
+    // start out aligned.
+    if (atlasCaseOverride !== null) return atlasCaseOverride;
+    return globalCaseRef();
+  }
+
+  function renderCaseSelect() {
+    if (!caseSelect) return;
+    const current = activeCaseRef();
+    const options = ['<option value="">All operations</option>'];
+    knownAtlasCases.forEach((item) => {
+      const ref = String(item.case_ref || "");
+      const label = `${ref}${item.case_name ? ` - ${item.case_name}` : ""}`;
+      options.push(
+        `<option value="${escHtml(ref)}">${escHtml(label)}</option>`,
+      );
+    });
+    caseSelect.innerHTML = options.join("");
+    caseSelect.value = current;
+  }
+
+  async function refreshAtlasCases() {
+    if (!caseSelect) return;
+    try {
+      const resp = await fetch(apiUrl("/cases"));
+      if (!resp.ok) return;
+      const data = await resp.json();
+      knownAtlasCases = Array.isArray(data.cases) ? data.cases : [];
+      renderCaseSelect();
+    } catch (_) {
+      // Network hiccup is not fatal - the picker just keeps its last list.
+    }
+  }
+
+  async function loadNetwork(entityName = "") {
+    const params = new URLSearchParams();
+    params.set("limit", "140");
+    if (entityName) {
+      params.set("entity", entityName);
+      params.set("hops", "2");
+    }
+    const caseRef = activeCaseRef();
+    if (caseRef) params.set("case_ref", caseRef);
+    const resp = await fetch(apiUrl(`/graph/network?${params.toString()}`));
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (entityName && data.meta && data.meta.entity_found === false) {
@@ -457,23 +508,12 @@
       }).slice(0, 4);
     });
     const edges = Array.from(collapsedByKey.values());
-    if (!entityName && options.autoFocus !== false && nodes.length) {
-      const focusNode = [...nodes].sort((a, b) => {
-        const mentionDelta = Number(b.mention_count || 0) - Number(a.mention_count || 0);
-        if (mentionDelta !== 0) return mentionDelta;
-        return String(a.label || "").localeCompare(String(b.label || ""));
-      })[0];
-      if (focusNode?.label) {
-        if (input) input.value = focusNode.label;
-        return loadNetwork(focusNode.label, { autoFocus: false });
-      }
-    }
     if (cy) cy.destroy();
     if (!window.cytoscape) {
-      setGraphStatus("Graph library failed to load (Cytoscape unavailable).");
+      cyRoot.innerHTML =
+        '<div class="timeline-empty">Graph library failed to load (Cytoscape CDN unavailable).</div>';
       return;
     }
-    const useFocusedLayout = Boolean(entityName);
     cy = window.cytoscape({
       container: cyRoot,
       elements: [
@@ -536,7 +576,7 @@
             "target-arrow-shape": "triangle",
             "arrow-scale": 0.7,
             "curve-style": "bezier",
-            label: "",
+            label: "data(type_label)",
             "font-size": 8,
             color: "#d6e3ee",
             "text-background-color": "#06080a",
@@ -583,32 +623,22 @@
           },
         },
       ],
-      layout: useFocusedLayout
-        ? {
-            name: "cose",
-            animate: false,
-            fit: true,
-            padding: 36,
-            randomize: true,
-            componentSpacing: 180,
-            nodeRepulsion: () => 11000,
-            idealEdgeLength: () => 110,
-            edgeElasticity: () => 70,
-            gravity: 0.4,
-            numIter: 1400,
-            initialTemp: 180,
-            coolingFactor: 0.95,
-            minTemp: 1.0,
-          }
-        : {
-            name: "concentric",
-            fit: true,
-            padding: 40,
-            minNodeSpacing: 28,
-            concentric: (node) => Number(node.data("mention_count") || 0),
-            levelWidth: () => 3,
-            animate: false,
-          },
+      layout: {
+        name: "cose",
+        animate: false,
+        fit: true,
+        padding: 36,
+        randomize: true,
+        componentSpacing: 220,
+        nodeRepulsion: () => 14000,
+        idealEdgeLength: () => 120,
+        edgeElasticity: () => 80,
+        gravity: 0.35,
+        numIter: 2800,
+        initialTemp: 220,
+        coolingFactor: 0.95,
+        minTemp: 1.0,
+      },
     });
     setDetail(null, edges, nodes, null);
     cy.on("tap", "node", (evt) => {
@@ -660,6 +690,35 @@
     loadNetwork(focusEntity).catch(() => {});
   });
 
+  // Re-render the atlas whenever the operator switches the active case
+  // (fired by case_manager.js). Without this, the graph stays pinned to
+  // whatever case was active on first boot and looks like data is missing
+  // after new cases are ingested/selected. If the operator has explicitly
+  // locked the Atlas to a case via the picker, we leave it alone so the
+  // Cases desk and the Atlas can be browsed independently.
+  window.addEventListener("lens:case-selected", () => {
+    refreshAtlasCases().catch(() => {});
+    if (atlasCaseOverride !== null) {
+      renderCaseSelect();
+      return;
+    }
+    renderCaseSelect();
+    const focus = (input?.value || "").trim();
+    loadNetwork(focus).catch((error) => {
+      cyRoot.innerHTML = `<div class="timeline-empty">Graph load failed: ${String(error)}</div>`;
+    });
+  });
+
+  if (caseSelect) {
+    caseSelect.addEventListener("change", () => {
+      atlasCaseOverride = caseSelect.value || "";
+      const focus = (input?.value || "").trim();
+      loadNetwork(focus).catch((error) => {
+        cyRoot.innerHTML = `<div class="timeline-empty">Graph load failed: ${String(error)}</div>`;
+      });
+    });
+  }
+
   // Phase 8: light up a specific path returned by the path finder. If the
   // path includes nodes outside the current canvas, we re-seed from the
   // source entity first so every hop is represented.
@@ -698,6 +757,11 @@
   });
 
   loadSchemaColors().finally(() => {
+    // Kick off the case picker population in parallel with the first render
+    // so the operator sees the full list of ingested operations as soon as
+    // possible. The initial loadNetwork() call uses whatever case is
+    // currently active (global or picker override, whichever resolves first).
+    refreshAtlasCases().catch(() => {});
     loadNetwork().catch((error) => {
       cyRoot.innerHTML = `<div class="timeline-empty">Graph load failed: ${String(error)}</div>`;
     });

@@ -12,9 +12,138 @@ const scopeInputs = Array.from(document.querySelectorAll('input[name="query-scop
 const chatThread = document.getElementById("query-chat-thread");
 const chatResetButton = document.getElementById("chat-reset-btn");
 const submitButton = form ? form.querySelector("button[type='submit']") : null;
+const agentTracePanel = document.getElementById("agent-trace-panel");
+const agentTrace = document.getElementById("agent-trace");
+const agentTraceStatus = document.getElementById("agent-trace-status");
 let inFlightController = null;
 const chatTurns = [];
 const CHAT_HISTORY_LIMIT = 12;
+
+function setAgentTraceStatus(label) {
+  if (agentTraceStatus) {
+    agentTraceStatus.textContent = label;
+  }
+}
+
+function resetAgentTrace(message) {
+  if (!agentTrace) return;
+  agentTrace.innerHTML = `<div class="timeline-empty">${escapeHtml(message)}</div>`;
+  setAgentTraceStatus("idle");
+}
+
+function appendTraceStep(event) {
+  if (!agentTrace) return;
+  if (agentTrace.querySelector(".timeline-empty")) {
+    agentTrace.innerHTML = "";
+  }
+  const step = document.createElement("div");
+  step.className = `agent-trace-step trace-${event.kind}`;
+
+  const head = document.createElement("div");
+  head.className = "agent-trace-step-head";
+  let label;
+  switch (event.kind) {
+    case "tool_call":
+      label = `→ ${event.tool || "tool"}`;
+      break;
+    case "tool_result":
+      label = `← ${event.tool || "tool"}`;
+      break;
+    case "thought":
+      label = "thought";
+      break;
+    case "thinking":
+      label = "thinking";
+      break;
+    case "error":
+      label = `error · ${event.error_type || "unknown"}`;
+      break;
+    case "start":
+      label = `start · scope ${event.scope || "?"}`;
+      break;
+    case "composing":
+      label = "composing briefing";
+      break;
+    default:
+      label = event.kind || "event";
+  }
+  head.textContent = label;
+  step.appendChild(head);
+
+  let body = "";
+  if (event.kind === "tool_call") {
+    body = event.args_preview || "";
+  } else if (event.kind === "tool_result") {
+    body = event.result_preview || "";
+  } else if (event.kind === "thought" || event.kind === "thinking") {
+    body = event.text || "";
+  } else if (event.kind === "error") {
+    body = event.message || "";
+  } else if (event.kind === "start") {
+    body = event.scope_label || "";
+  }
+  if (body) {
+    const bodyEl = document.createElement("pre");
+    bodyEl.className = "agent-trace-step-body";
+    bodyEl.textContent = body;
+    step.appendChild(bodyEl);
+  }
+
+  agentTrace.appendChild(step);
+  agentTrace.scrollTop = agentTrace.scrollHeight;
+}
+
+async function streamInvestigator(body, signal) {
+  const resp = await fetch("/query/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`stream failed (${resp.status}): ${text.slice(0, 240)}`);
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalPayload = null;
+  let terminalError = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const rawEvent = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const dataLine = rawEvent.split("\n").find((l) => l.startsWith("data:"));
+      if (!dataLine) continue;
+      const json = dataLine.slice(5).trim();
+      if (!json) continue;
+      let event;
+      try {
+        event = JSON.parse(json);
+      } catch (_) {
+        continue;
+      }
+      if (event.kind === "final") {
+        finalPayload = event.payload;
+      } else if (event.kind === "end") {
+        // terminal sentinel — nothing to render
+      } else if (event.kind === "error" && !event.recoverable) {
+        terminalError = event;
+        appendTraceStep(event);
+      } else {
+        appendTraceStep(event);
+      }
+    }
+  }
+  if (finalPayload) return finalPayload;
+  if (terminalError) throw new Error(`${terminalError.error_type}: ${terminalError.message}`);
+  throw new Error("stream ended without final payload");
+}
 
 function escapeHtml(value) {
   return String(value || "")
@@ -351,20 +480,29 @@ if (form) {
       evidenceChunks.innerHTML = '<div class="timeline-empty">Collecting evidence extracts.</div>';
     }
 
+    const requestBody = {
+      query,
+      case_ref: caseRef || null,
+      case_scope: caseRef || null,
+      doc_id: docId || null,
+      scope: selectedScope,
+      use_cloud: Boolean(cloudToggle?.checked),
+      chat_history: priorChatHistory,
+      recall_mode: recallModeSelect?.value || "auto",
+    };
+
+    resetAgentTrace("Investigator starting…");
+    setAgentTraceStatus("running");
+
+    async function runStreamRequest() {
+      return streamInvestigator(requestBody, inFlightController.signal);
+    }
+
     async function runRequest() {
       const resp = await fetch("/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query,
-          case_ref: caseRef || null,
-          case_scope: caseRef || null,
-          doc_id: docId || null,
-          scope: selectedScope,
-          use_cloud: Boolean(cloudToggle?.checked),
-          chat_history: priorChatHistory,
-          recall_mode: recallModeSelect?.value || "auto",
-        }),
+        body: JSON.stringify(requestBody),
         signal: inFlightController.signal,
       });
       if (!resp.ok) {
@@ -376,13 +514,15 @@ if (form) {
 
     try {
       let data;
+      const canStream = Boolean(selectedScope) && !requestBody.use_cloud;
       try {
-        data = await runRequest();
+        data = canStream ? await runStreamRequest() : await runRequest();
       } catch (firstErr) {
         if (firstErr.name === "AbortError") throw firstErr;
         await new Promise((resolve) => setTimeout(resolve, 400));
         data = await runRequest();
       }
+      setAgentTraceStatus("done");
 
       answer.innerHTML = `
         <div class="answer-header">
@@ -410,7 +550,11 @@ if (form) {
       });
       window.dispatchEvent(new CustomEvent("lens:query-result", { detail: data }));
     } catch (error) {
-      if (error.name === "AbortError") return;
+      if (error.name === "AbortError") {
+        setAgentTraceStatus("cancelled");
+        return;
+      }
+      setAgentTraceStatus("failed");
       pushChatTurn("assistant", `Request failed: ${String(error)}`);
       answer.innerHTML = `
         <div class="answer-header">

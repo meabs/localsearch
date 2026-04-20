@@ -1978,3 +1978,88 @@ input[type="file"]::-webkit-file-upload-button {
   flex-wrap: wrap;
   gap: 4px;
 }
+
+.agent-trace-panel {
+  padding: 0;
+}
+.agent-trace-panel > .agent-trace-summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  list-style: none;
+  user-select: none;
+}
+.agent-trace-panel > .agent-trace-summary::-webkit-details-marker {
+  display: none;
+}
+.agent-trace-panel > .agent-trace-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform 120ms ease;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+.agent-trace-panel[open] > .agent-trace-summary::before {
+  transform: rotate(90deg);
+}
+.agent-trace-status {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  padding: 2px 8px;
+  border: 1px solid var(--border-0);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.agent-trace {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  font-size: 12px;
+}
+.agent-trace-step {
+  border: 1px solid var(--border-0);
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.agent-trace-step-head {
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin-bottom: 2px;
+  letter-spacing: 0.02em;
+}
+.agent-trace-step-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--body);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.agent-trace-step.trace-tool_call {
+  border-left-color: #5eb0ff;
+}
+.agent-trace-step.trace-tool_result {
+  border-left-color: #7cd6a6;
+}
+.agent-trace-step.trace-thought,
+.agent-trace-step.trace-thinking {
+  border-left-color: var(--amber-dim);
+}
+.agent-trace-step.trace-start,
+.agent-trace-step.trace-composing {
+  border-left-color: rgba(110, 146, 178, 0.55);
+}
+.agent-trace-step.trace-error {
+  border-left-color: #c0453e;
+  background: rgba(192, 69, 62, 0.08);
+}

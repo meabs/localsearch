@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, AsyncIterator
 
 import duckdb
 import httpx
@@ -146,7 +146,7 @@ def build_investigator(
         _build_model(settings),
         deps_type=InvestigatorDeps,
         output_type=InvestigationReport,
-        retries=2,
+        retries=5,
     )
 
     @agent.system_prompt
@@ -267,6 +267,7 @@ async def investigate(
     the deterministic path in that case.
     """
     try:
+        from pydantic_ai.exceptions import UsageLimitExceeded
         from pydantic_ai.usage import UsageLimits
     except ImportError as exc:
         raise RuntimeError("pydantic-ai-slim is not installed in the active environment.") from exc
@@ -276,6 +277,19 @@ async def investigate(
     limits = UsageLimits(request_limit=settings.investigator_max_iterations)
     try:
         result = await agent.run(query, deps=deps, usage_limits=limits)
+    except UsageLimitExceeded as exc:
+        logger.warning(
+            "Investigator exhausted its %d-request budget before finishing",
+            settings.investigator_max_iterations,
+        )
+        return InvestigationReport(
+            hypothesis="Investigator ran out of tool-call budget before reaching a conclusion.",
+            confidence="LOW",
+            gaps=[
+                f"iteration_budget_exhausted: hit {settings.investigator_max_iterations}-request "
+                "limit; raise INVESTIGATOR_MAX_ITERATIONS or narrow the query scope"
+            ],
+        )
     except Exception as exc:
         if _is_tool_support_error(exc):
             fallback_model = _select_tool_capable_investigator_model(settings)
@@ -306,3 +320,158 @@ async def investigate(
             gaps=[f"agent_error: {type(exc).__name__}"],
         )
     return result.output
+
+
+def _preview(value: Any, limit: int = 400) -> str:
+    """Stringify a tool argument or result for UI preview, truncating cleanly."""
+    if value is None:
+        return ""
+    try:
+        if hasattr(value, "model_dump"):
+            text = str(value.model_dump())
+        elif isinstance(value, (list, tuple)):
+            text = f"[{len(value)} items] " + ", ".join(_preview(v, 80) for v in value[:3])
+            if len(value) > 3:
+                text += f", …(+{len(value) - 3} more)"
+        else:
+            text = str(value)
+    except Exception:
+        text = repr(value)
+    if len(text) > limit:
+        return text[: limit - 1] + "…"
+    return text
+
+
+async def investigate_stream(
+    query: str,
+    scope: ScopeContext,
+    duck: duckdb.DuckDBPyConnection,
+    *,
+    settings: Settings = default_settings,
+) -> AsyncIterator[dict[str, Any]]:
+    """Run the investigator and yield trace events as they occur.
+
+    Event kinds:
+      - ``tool_call``      {tool, args_preview, tool_call_id}
+      - ``tool_result``    {tool, result_preview, tool_call_id}
+      - ``thought``        {text}            (assistant prose between tool turns)
+      - ``thinking``       {text}            (explicit reasoning block, if model emits one)
+      - ``report``         {report}          terminal — structured InvestigationReport
+      - ``error``          {error_type, message, recoverable}
+    """
+    try:
+        from pydantic_ai.exceptions import UsageLimitExceeded
+        from pydantic_ai.usage import UsageLimits
+        from pydantic_ai._agent_graph import CallToolsNode, End, ModelRequestNode
+        from pydantic_ai.messages import (
+            TextPart,
+            ThinkingPart,
+            ToolCallPart,
+            ToolReturnPart,
+        )
+    except ImportError as exc:
+        raise RuntimeError("pydantic-ai-slim is not installed in the active environment.") from exc
+
+    agent = build_investigator(settings)
+    deps = InvestigatorDeps(scope=scope, duck=duck)
+    limits = UsageLimits(request_limit=settings.investigator_max_iterations)
+
+    async def _drive(run_agent) -> AsyncIterator[dict[str, Any]]:
+        async with run_agent.iter(query, deps=deps, usage_limits=limits) as agent_run:
+            async for node in agent_run:
+                if isinstance(node, CallToolsNode):
+                    for part in node.model_response.parts:
+                        if isinstance(part, ToolCallPart):
+                            yield {
+                                "kind": "tool_call",
+                                "tool": part.tool_name,
+                                "args_preview": _preview(part.args),
+                                "tool_call_id": part.tool_call_id,
+                            }
+                        elif isinstance(part, ThinkingPart):
+                            if part.content:
+                                yield {"kind": "thinking", "text": part.content}
+                        elif isinstance(part, TextPart):
+                            if part.content and part.content.strip():
+                                yield {"kind": "thought", "text": part.content}
+                elif isinstance(node, ModelRequestNode):
+                    for part in node.request.parts:
+                        if isinstance(part, ToolReturnPart):
+                            yield {
+                                "kind": "tool_result",
+                                "tool": part.tool_name,
+                                "result_preview": _preview(part.content),
+                                "tool_call_id": part.tool_call_id,
+                            }
+                elif isinstance(node, End):
+                    output = getattr(node.data, "output", None)
+                    if output is not None and hasattr(output, "model_dump"):
+                        yield {"kind": "report", "report": output.model_dump()}
+
+    try:
+        async for event in _drive(agent):
+            yield event
+    except UsageLimitExceeded:
+        logger.warning(
+            "Investigator exhausted its %d-request budget before finishing",
+            settings.investigator_max_iterations,
+        )
+        yield {
+            "kind": "error",
+            "error_type": "UsageLimitExceeded",
+            "message": (
+                f"Hit {settings.investigator_max_iterations}-request budget. "
+                "Raise INVESTIGATOR_MAX_ITERATIONS or narrow the query scope."
+            ),
+            "recoverable": False,
+        }
+        yield {
+            "kind": "report",
+            "report": InvestigationReport(
+                hypothesis="Investigator ran out of tool-call budget before reaching a conclusion.",
+                confidence="LOW",
+                gaps=[
+                    f"iteration_budget_exhausted: hit {settings.investigator_max_iterations}-request limit"
+                ],
+            ).model_dump(),
+        }
+    except Exception as exc:
+        if _is_tool_support_error(exc):
+            fallback_model = _select_tool_capable_investigator_model(settings)
+            if fallback_model and fallback_model != settings.investigator_model:
+                logger.warning(
+                    "Investigator model %s does not support tools; retrying stream with %s",
+                    settings.investigator_model,
+                    fallback_model,
+                )
+                yield {
+                    "kind": "error",
+                    "error_type": "ToolSupportError",
+                    "message": f"{settings.investigator_model} lacks tool support; retrying with {fallback_model}",
+                    "recoverable": True,
+                }
+                fallback_settings = settings.model_copy(
+                    update={"investigator_model": fallback_model}
+                )
+                fallback_agent = build_investigator(fallback_settings)
+                try:
+                    async for event in _drive(fallback_agent):
+                        yield event
+                    return
+                except Exception as fallback_exc:
+                    exc = fallback_exc
+        logger.warning("Investigator stream failed: %s", exc)
+        yield {
+            "kind": "error",
+            "error_type": type(exc).__name__,
+            "message": str(exc)[:400],
+            "recoverable": False,
+        }
+        yield {
+            "kind": "report",
+            "report": InvestigationReport(
+                hypothesis="Investigator agent failed to complete the investigation.",
+                confidence="LOW",
+                gaps=[f"agent_error: {type(exc).__name__}"],
+            ).model_dump(),
+        }

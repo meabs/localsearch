@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     investigator_model: str = Field(default="gpt-oss:20b", alias="INVESTIGATOR_MODEL")
     writer_model: str = Field(default="deepseek-r1:latest", alias="WRITER_MODEL")
     critic_model: str = Field(default="llama3.1:8b-instruct-q4_K_M", alias="CRITIC_MODEL")
-    investigator_max_iterations: int = Field(default=10, alias="INVESTIGATOR_MAX_ITERATIONS")
+    investigator_max_iterations: int = Field(default=25, alias="INVESTIGATOR_MAX_ITERATIONS")
     investigator_timeout: float = Field(default=180.0, alias="INVESTIGATOR_TIMEOUT")
 
     # ── Embeddings ────────────────────────────────────────────────────────────

@@ -33,6 +33,7 @@ function describeUploadType(fileName) {
 }
 
 function setSelectedCase(caseRef, options = {}) {
+  const previous = selectedCaseRef;
   selectedCaseRef = caseRef || "";
   if (caseUploadSelect) {
     caseUploadSelect.value = selectedCaseRef;
@@ -43,6 +44,18 @@ function setSelectedCase(caseRef, options = {}) {
   renderCaseList();
   if (!options.skipDocuments && selectedCaseRef) {
     loadDocuments(selectedCaseRef);
+  }
+  // Share the selection so other panels (graph atlas, insights, ...) can
+  // scope their data to the active case. Using a window global + a custom
+  // event keeps the cross-script surface minimal and race-free for late
+  // subscribers that initialise after case_manager.js has already run.
+  window.__lensSelectedCaseRef = selectedCaseRef;
+  if (previous !== selectedCaseRef) {
+    window.dispatchEvent(
+      new CustomEvent("lens:case-selected", {
+        detail: { caseRef: selectedCaseRef, previousCaseRef: previous },
+      }),
+    );
   }
 }
 

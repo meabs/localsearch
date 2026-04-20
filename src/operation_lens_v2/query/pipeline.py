@@ -19,7 +19,7 @@ from operation_lens_v2.query import (
     retriever_graph,
     retriever_vector,
 )
-from operation_lens_v2.query.investigator import investigate
+from operation_lens_v2.query.investigator import investigate, investigate_stream
 from operation_lens_v2.query.scope import ScopeContext, build_scope
 from operation_lens_v2.query.tool_schemas import InvestigationReport
 from operation_lens_v2.query.writer import compose_briefing
@@ -833,6 +833,87 @@ async def run_query(
 # ── Investigator-agent path ──────────────────────────────────────────────────
 
 
+def _collect_report_doc_ids(report: InvestigationReport) -> set[str]:
+    """Walk the report and collect every doc_id that appears on a citation."""
+    doc_ids: set[str] = set()
+    for fact in report.key_facts:
+        if fact.citation and fact.citation.doc_id:
+            doc_ids.add(fact.citation.doc_id)
+    for path in report.paths:
+        for cite in path.citations:
+            if cite.doc_id:
+                doc_ids.add(cite.doc_id)
+    for event in report.timeline:
+        if event.doc_id:
+            doc_ids.add(event.doc_id)
+    for cite in report.evidence_citations:
+        if cite.doc_id:
+            doc_ids.add(cite.doc_id)
+    return doc_ids
+
+
+def _resolve_doc_names(doc_ids: set[str], con) -> dict[str, str]:
+    """Map doc_id → filename (stem without extension) for UI-friendly citations."""
+    if not doc_ids:
+        return {}
+    placeholders = ",".join("?" for _ in doc_ids)
+    rows = con.execute(
+        f"SELECT doc_id, filename FROM documents WHERE doc_id IN ({placeholders})",
+        list(doc_ids),
+    ).fetchall()
+    resolved: dict[str, str] = {}
+    for doc_id, filename in rows:
+        if not filename:
+            continue
+        name = str(filename)
+        for ext in (".pdf", ".PDF", ".txt"):
+            if name.endswith(ext):
+                name = name[: -len(ext)]
+                break
+        resolved[str(doc_id)] = name
+    return resolved
+
+
+def _enrich_report_with_doc_names(report: InvestigationReport, con) -> dict[str, str]:
+    """Populate doc_name on every citation in the report. Returns the resolver map."""
+    name_map = _resolve_doc_names(_collect_report_doc_ids(report), con)
+    if not name_map:
+        return {}
+    for fact in report.key_facts:
+        cite = fact.citation
+        if cite and cite.doc_id and not cite.doc_name:
+            cite.doc_name = name_map.get(cite.doc_id)
+    for path in report.paths:
+        for cite in path.citations:
+            if cite.doc_id and not cite.doc_name:
+                cite.doc_name = name_map.get(cite.doc_id)
+    for event in report.timeline:
+        if event.doc_id and not event.doc_name:
+            event.doc_name = name_map.get(event.doc_id)
+    for cite in report.evidence_citations:
+        if cite.doc_id and not cite.doc_name:
+            cite.doc_name = name_map.get(cite.doc_id)
+    return name_map
+
+
+_DOC_ID_IN_TEXT = re.compile(
+    r"\b(?:DOC_ID\s*[:=]\s*)?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b"
+)
+
+
+def _rewrite_doc_ids_in_text(text: str, name_map: dict[str, str]) -> str:
+    """Replace any literal doc_id uuid (optionally prefixed 'DOC_ID=') with doc_name."""
+    if not text or not name_map:
+        return text
+
+    def _sub(match: re.Match[str]) -> str:
+        uuid = match.group(1)
+        name = name_map.get(uuid)
+        return name if name else match.group(0)
+
+    return _DOC_ID_IN_TEXT.sub(_sub, text)
+
+
 def _claims_from_report(report: InvestigationReport) -> list[dict[str, object]]:
     """Project atomic facts into the response-shape claims array."""
     claims: list[dict[str, object]] = []
@@ -881,8 +962,10 @@ async def run_investigator_query(
     try:
         with timer.measure("investigate"):
             report = await investigate(query_text, scope, con)
+        doc_name_map = _enrich_report_with_doc_names(report, con)
         with timer.measure("compose_briefing"):
             answer = await compose_briefing(report, query_text)
+        answer = _rewrite_doc_ids_in_text(answer, doc_name_map)
 
         query_id = str(uuid4())
         case_scope_label = (
@@ -934,6 +1017,125 @@ async def run_investigator_query(
             "report": report.model_dump(),
             "result_count": len(report.key_facts),
             "top_results": [],
+        }
+    finally:
+        timer.log_summary()
+
+
+async def run_investigator_query_stream(
+    query_text: str,
+    *,
+    scope_mode: str,
+    doc_id: str | None = None,
+    case_scope: str | None = None,
+):
+    """Stream the investigator run as a sequence of event dicts.
+
+    Emits a ``start`` event, pass-through trace events from ``investigate_stream``
+    (``tool_call`` / ``tool_result`` / ``thought`` / ``thinking`` / ``error``), a
+    ``composing`` event once the tool loop ends, then a ``final`` event with the
+    same payload shape as ``run_investigator_query``. Persistence to DuckDB happens
+    before ``final`` is emitted so the client sees query_id land on completion.
+    """
+    timer = StageTimer(label=f"investigator_stream:{query_text[:80]}")
+    con = get_duck_connection(settings.duckdb_path)
+
+    with timer.measure("build_scope"):
+        scope: ScopeContext = build_scope(
+            scope_mode,
+            doc_id=doc_id,
+            case_scope=case_scope,
+        )
+
+    case_scope_label = (
+        case_scope
+        if scope.mode.value == "case"
+        else ("DOCUMENT:" + doc_id if scope.mode.value == "document" and doc_id else "ALL_CASES")
+    )
+
+    yield {
+        "kind": "start",
+        "scope": scope.mode.value,
+        "scope_label": scope.describe(),
+        "case_scope": case_scope_label,
+        "query": query_text,
+    }
+
+    report: InvestigationReport | None = None
+    try:
+        with timer.measure("investigate_stream"):
+            async for event in investigate_stream(query_text, scope, con):
+                if event.get("kind") == "report":
+                    raw = event.get("report") or {}
+                    try:
+                        report = InvestigationReport.model_validate(raw)
+                    except Exception:  # noqa: BLE001 — keep stream alive on validation drift
+                        logger.warning("Failed to revalidate InvestigationReport from stream event")
+                        report = None
+                else:
+                    yield event
+
+        if report is None:
+            report = InvestigationReport(
+                hypothesis="Investigator stream ended without producing a report.",
+                confidence="LOW",
+                gaps=["no_report_emitted"],
+            )
+
+        doc_name_map = _enrich_report_with_doc_names(report, con)
+        yield {"kind": "composing", "message": "Drafting briefing narrative"}
+        with timer.measure("compose_briefing"):
+            answer = await compose_briefing(report, query_text)
+        answer = _rewrite_doc_ids_in_text(answer, doc_name_map)
+
+        query_id = str(uuid4())
+        claims = _claims_from_report(report)
+
+        with timer.measure("persist_answer"):
+            con.execute(
+                (
+                    "INSERT INTO queries "
+                    "(query_id, query_text, intent, llm_backend) "
+                    "VALUES (?, ?, ?, ?)"
+                ),
+                [query_id, query_text, "investigator_agent", "local-investigator"],
+            )
+            for claim in claims:
+                con.execute(
+                    """
+                    INSERT INTO answer_spans (
+                      span_id, query_id, claim_text, supporting_evidence, confidence, validated
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        str(uuid4()),
+                        query_id,
+                        claim["text"],
+                        [f"{c['doc_id']}:{c['page']}" for c in claim["citations"]],
+                        claim["confidence"],
+                        True,
+                    ],
+                )
+
+        yield {
+            "kind": "final",
+            "payload": {
+                "query_id": query_id,
+                "intent": "investigator_agent",
+                "entities": [],
+                "entities_resolved": [],
+                "case_scope": case_scope_label,
+                "backend": "local-investigator",
+                "recall_mode": "investigator",
+                "scope": scope.mode.value,
+                "scope_label": scope.describe(),
+                "answer": answer,
+                "claims": claims,
+                "report": report.model_dump(),
+                "result_count": len(report.key_facts),
+                "top_results": [],
+            },
         }
     finally:
         timer.log_summary()

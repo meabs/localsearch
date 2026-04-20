@@ -30,7 +30,7 @@ def _fact(doc_id: str = "doc-1", page: int = 1) -> AtomicFact:
         predicate="was interviewed in",
         object="NF-INT-001",
         confidence=0.9,
-        citation=Citation(doc_id=doc_id, doc_name=f"{doc_id}.pdf", page=page),
+        citation=Citation(doc_id=doc_id, doc_name=doc_id, page=page),
     )
 
 
@@ -131,14 +131,14 @@ def test_deterministic_briefing_renders_timeline():
         event_time="2024-05-01",
         text="Webb observed at 14 Arkwright Road 21:40.",
         doc_id="doc-3",
-        doc_name="surv.pdf",
+        doc_name="surv",
         page=2,
     )
     report = _report(timeline=[event])
     text = deterministic_briefing(report)
     assert "TIMELINE" in text
     assert "2024-05-01" in text
-    assert "[doc-3, p.2]" in text
+    assert "[surv, p.2]" in text
 
 
 def test_spans_multiple_docs_detects_mixed_docs():

@@ -21,21 +21,29 @@ _http_clients: dict[tuple[str, float], httpx.AsyncClient] = {}
 
 
 def get_duck_connection(path: str):
+    """Return a thread-safe DuckDB cursor over the cached base connection.
+
+    DuckDB's ``DuckDBPyConnection`` is not safe to share across threads, but
+    FastAPI executes sync endpoints on a worker threadpool. Calling
+    ``base.cursor()`` yields a sibling connection over the same database that
+    each request/thread can use independently, which avoids the
+    "pending query result" races seen under concurrent requests.
+    """
     resolved = str(Path(path))
-    con = _duck_connections.get(resolved)
-    if con is None:
-        con = connect(resolved)
-        _duck_connections[resolved] = con
-    return con
+    base = _duck_connections.get(resolved)
+    if base is None:
+        base = connect(resolved)
+        _duck_connections[resolved] = base
+    return base.cursor()
 
 
 def reset_duck_connection(path: str) -> None:
     resolved = str(Path(path))
-    con = _duck_connections.pop(resolved, None)
-    if con is None:
+    base = _duck_connections.pop(resolved, None)
+    if base is None:
         return
     try:
-        con.close()
+        base.close()
     except Exception:
         logger.debug("DuckDB connection close failed during reset", exc_info=True)
 
@@ -75,9 +83,9 @@ async def close_runtime_resources() -> None:
 
     connections = list(_duck_connections.values())
     _duck_connections.clear()
-    for con in connections:
+    for base in connections:
         try:
-            con.close()
+            base.close()
         except Exception:
             logger.debug("DuckDB connection close failed during shutdown", exc_info=True)
 

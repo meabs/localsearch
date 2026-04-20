@@ -67,7 +67,7 @@ def test_writer_prompt_lists_all_required_sections():
 def test_writer_prompt_forbids_markdown_and_preamble():
     assert "No markdown" in WRITER_SYSTEM_PROMPT
     assert "preamble" in WRITER_SYSTEM_PROMPT
-    assert "[DOC_ID, p.N]" in WRITER_SYSTEM_PROMPT
+    assert "[doc_name, p.N]" in WRITER_SYSTEM_PROMPT
 
 
 def test_writer_prompt_requires_narrative_assessment():
@@ -84,4 +84,4 @@ def test_critic_prompt_requests_structured_review():
 def test_freeform_fallback_prompt_contract():
     for section in ("ASSESSMENT", "KEY FINDINGS", "CONFIDENCE POSTURE", "EVIDENCE GAPS"):
         assert section in FREEFORM_FALLBACK_PROMPT
-    assert "[DOC_ID, p.N]" in FREEFORM_FALLBACK_PROMPT
+    assert "[doc_name, p.N]" in FREEFORM_FALLBACK_PROMPT

@@ -69,7 +69,8 @@ ASSESSMENT
 
 KEY FINDINGS
   Three to six bullet points. Each bullet ends with exactly one citation in the form
-  [DOC_ID, p.N]. One fact per bullet.
+  [doc_name, p.N] — use the citation.doc_name field from the report (not doc_id).
+  If doc_name is missing, fall back to doc_id. One fact per bullet.
 
 CROSS-DOCUMENT LINKS
   Include this section only if the report's evidence spans two or more documents.
@@ -92,7 +93,8 @@ SUGGESTED NEXT ACTIONS
 - No markdown, no asterisks, no emojis, no code fences.
 - Do not repeat the user's question verbatim.
 - Do not invent facts not present in the report.
-- Citation format [DOC_ID, p.N] is the only allowed form.
+- Citation format is [doc_name, p.N]. Always prefer the citation.doc_name field from
+  the report over doc_id. Never emit raw uuid-style doc_ids if a doc_name is present.
 - Do not add sections other than those listed.
 - Do not write "Here is the briefing" or any preamble. Start with ASSESSMENT.
 """
@@ -127,8 +129,9 @@ FREEFORM_FALLBACK_PROMPT = """\
 You are an intelligence analyst. The investigator agent failed to complete, so you
 must compose a briefing directly from raw evidence chunks. Follow the same output
 contract as the writer: ASSESSMENT, KEY FINDINGS, CONFIDENCE POSTURE, EVIDENCE GAPS.
-Cite every claim as [DOC_ID, p.N]. Plain text only. If the evidence is thin, say so
-in the ASSESSMENT.
+Cite every claim as [doc_name, p.N], preferring the human-readable document name
+over any uuid-style doc_id. Plain text only. If the evidence is thin, say so in
+the ASSESSMENT.
 """
 
 

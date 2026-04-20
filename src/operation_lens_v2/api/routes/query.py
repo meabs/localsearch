@@ -1,7 +1,17 @@
+import json
+import logging
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from operation_lens_v2.api.schemas import QueryRequest
-from operation_lens_v2.query.pipeline import run_investigator_query, run_query
+from operation_lens_v2.query.pipeline import (
+    run_investigator_query,
+    run_investigator_query_stream,
+    run_query,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/query", tags=["query"])
 
@@ -55,6 +65,61 @@ async def query_endpoint(payload: QueryRequest) -> dict[str, object]:
         use_cloud=payload.use_cloud,
         chat_history=payload.chat_history,
         recall_mode=payload.recall_mode,
+    )
+
+
+@router.post("/stream")
+async def query_stream_endpoint(payload: QueryRequest) -> StreamingResponse:
+    """Stream the investigator run as Server-Sent Events.
+
+    Only the investigator path streams. Requires ``scope`` to be set; otherwise
+    returns 400 — the deterministic retrieve/rerank pipeline doesn't have natural
+    streaming boundaries and should use ``POST /query`` instead.
+    """
+    if payload.scope is None:
+        raise HTTPException(
+            status_code=400,
+            detail="streaming requires scope (corpus|case|document); use POST /query for non-streaming",
+        )
+
+    case_scope = payload.case_scope or payload.case_ref
+
+    async def event_source():
+        try:
+            async for event in run_investigator_query_stream(
+                payload.query,
+                scope_mode=payload.scope,
+                doc_id=payload.doc_id,
+                case_scope=case_scope,
+            ):
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+        except ValueError as exc:
+            yield (
+                "data: "
+                + json.dumps({"kind": "error", "error_type": "ValueError", "message": str(exc), "recoverable": False})
+                + "\n\n"
+            )
+        except Exception as exc:  # noqa: BLE001 — surface the failure to the client
+            logger.exception("streaming query failed")
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "kind": "error",
+                        "error_type": type(exc).__name__,
+                        "message": str(exc)[:400],
+                        "recoverable": False,
+                    }
+                )
+                + "\n\n"
+            )
+        finally:
+            yield "data: {\"kind\": \"end\"}\n\n"
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

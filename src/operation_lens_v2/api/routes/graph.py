@@ -195,8 +195,46 @@ def entities(limit: int = 100) -> dict[str, object]:
 
 
 @router.get("/network")
-def network(limit: int = 300, entity: str | None = None, hops: int = 2) -> dict[str, object]:
+def network(
+    limit: int = 300,
+    entity: str | None = None,
+    hops: int = 2,
+    case_ref: str | None = None,
+) -> dict[str, object]:
     con = get_duck_connection(settings.duckdb_path)
+
+    # Resolve an optional case filter up front so both the seeded and
+    # unseeded branches can share the same EXISTS-clause shape. Relationships
+    # are attached to a case via their evidence rows (documents.case_id).
+    case_id: str | None = None
+    if case_ref:
+        case_id = get_case_id_by_ref(con, case_ref)
+        if case_id is None:
+            return {
+                "focus_entity": entity,
+                "focus_node_ids": [],
+                "hops": hops,
+                "case_ref": case_ref,
+                "nodes": [],
+                "edges": [],
+                "meta": {
+                    "node_count": 0,
+                    "edge_count": 0,
+                    "avg_confidence": 0.0,
+                    "entity_found": False,
+                    "case_found": False,
+                },
+            }
+    case_filter_sql = (
+        " AND EXISTS ("
+        "SELECT 1 FROM relationship_evidence re2 "
+        "JOIN documents d2 ON d2.doc_id = re2.doc_id "
+        "WHERE re2.rel_id = r.rel_id AND d2.case_id = ?"
+        ")"
+        if case_id
+        else ""
+    )
+
     focus_node_ids: list[str] = []
     if entity:
         entity_norm = entity.strip().lower()
@@ -283,6 +321,7 @@ def network(limit: int = 300, entity: str | None = None, hops: int = 2) -> dict[
             LEFT JOIN latest_attachments la_tgt ON la_tgt.entity_id = et.entity_id
             WHERE r.source_entity IN (SELECT DISTINCT node_id FROM walk)
               AND r.target_entity IN (SELECT DISTINCT node_id FROM walk)
+              {case_filter}
             GROUP BY
               r.rel_id, r.source_entity, r.target_entity, r.relation_type, r.confidence,
               es.canonical_name, et.canonical_name, es.entity_type, et.entity_type,
@@ -290,8 +329,16 @@ def network(limit: int = 300, entity: str | None = None, hops: int = 2) -> dict[
               es.latitude, es.longitude, et.latitude, et.longitude
             ORDER BY r.confidence DESC, evidence_count DESC
             LIMIT ?
-            """.format(seed_ids=",".join(["?"] * len(seed_ids))),
-            [*seed_ids, max(0, hops), limit],
+            """.format(
+                seed_ids=",".join(["?"] * len(seed_ids)),
+                case_filter=case_filter_sql,
+            ),
+            [
+                *seed_ids,
+                max(0, hops),
+                *([case_id] if case_id else []),
+                limit,
+            ],
         ).fetchall()
     else:
         edge_rows = con.execute(
@@ -333,6 +380,8 @@ def network(limit: int = 300, entity: str | None = None, hops: int = 2) -> dict[
             LEFT JOIN relationship_evidence re ON re.rel_id = r.rel_id
             LEFT JOIN latest_attachments la_src ON la_src.entity_id = es.entity_id
             LEFT JOIN latest_attachments la_tgt ON la_tgt.entity_id = et.entity_id
+            WHERE 1 = 1
+              {case_filter}
             GROUP BY
               r.rel_id, r.source_entity, r.target_entity, r.relation_type, r.confidence,
               es.canonical_name, et.canonical_name, es.entity_type, et.entity_type,
@@ -340,8 +389,11 @@ def network(limit: int = 300, entity: str | None = None, hops: int = 2) -> dict[
               es.latitude, es.longitude, et.latitude, et.longitude
             ORDER BY r.confidence DESC
             LIMIT ?
-            """,
-            [max(limit, 1)],
+            """.format(case_filter=case_filter_sql),
+            [
+                *([case_id] if case_id else []),
+                max(limit, 1),
+            ],
         ).fetchall()
 
     edge_rows = edge_rows[:limit]
@@ -386,6 +438,7 @@ def network(limit: int = 300, entity: str | None = None, hops: int = 2) -> dict[
         "focus_entity": entity,
         "focus_node_ids": focus_node_ids,
         "hops": hops,
+        "case_ref": case_ref,
         "nodes": list(nodes.values()),
         "edges": edges,
         "meta": {
