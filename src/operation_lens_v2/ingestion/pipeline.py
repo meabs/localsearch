@@ -19,6 +19,7 @@ from operation_lens_v2.ingestion import (
     relationship_extractor,
     vector_store,
 )
+from operation_lens_v2.ingestion.csv_ingest import CsvIngestConfig, ingest_csv
 
 logger = logging.getLogger(__name__)
 
@@ -264,19 +265,56 @@ async def ingest_corpus(
     case_name: str | None = None,
     force: bool = False,
 ) -> list[dict[str, int | str]]:
-    """Ingest all PDFs in a directory sequentially (one at a time to manage memory)."""
-    pdf_files = sorted(corpus_dir.glob("*.pdf"))
-    if not pdf_files:
-        logger.warning("No PDF files found in %s", corpus_dir)
+    """Ingest supported files in a directory sequentially."""
+    files = sorted(
+        [
+            *corpus_dir.glob("*.pdf"),
+            *corpus_dir.glob("*.csv"),
+            *corpus_dir.glob("*.tsv"),
+        ]
+    )
+    if not files:
+        logger.warning("No supported files found in %s", corpus_dir)
         return []
     results = []
-    for pdf_path in pdf_files:
-        result = await ingest_pdf(
-            pdf_path,
-            db_path=db_path,
-            case_ref=case_ref,
-            case_name=case_name,
-            force=force,
-        )
+    for input_path in files:
+        if input_path.suffix.lower() in {".csv", ".tsv"}:
+            result = await ingest_tabular(
+                input_path,
+                db_path=db_path,
+                case_ref=case_ref,
+                case_name=case_name,
+            )
+        else:
+            result = await ingest_pdf(
+                input_path,
+                db_path=db_path,
+                case_ref=case_ref,
+                case_name=case_name,
+                force=force,
+            )
         results.append(result)
     return results
+
+
+async def ingest_tabular(
+    csv_path: Path,
+    *,
+    db_path: str | None = None,
+    case_ref: str = "UNASSIGNED",
+    case_name: str | None = None,
+) -> dict[str, int | str]:
+    """Ingest CSV/TSV content into the standard NER/relationship/vector pipeline."""
+    del case_name  # case naming is managed inside csv_ingest via case_ref.
+    db_path = db_path or settings.duckdb_path
+    con = duck_store.init_db(db_path)
+    vs = vector_store.VectorStore(settings.lancedb_path)
+    return await ingest_csv(
+        csv_path=csv_path,
+        case_ref=case_ref,
+        duck_con=con,
+        lance_table=vs,
+        gliner_model=ner_gliner.load_gliner_model(),
+        ollama_client=None,
+        config=CsvIngestConfig(delimiter="\t" if csv_path.suffix.lower() == ".tsv" else None),
+    )

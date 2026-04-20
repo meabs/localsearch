@@ -18,16 +18,10 @@ def _clean_text(text: str) -> str:
     return text
 
 
-def _ocr_page(page, doc_id: str, page_no: int) -> str:
-    """Attempt Tesseract OCR on a pdfplumber page. Returns extracted text or ''."""
+def ocr_image(pil_image, *, doc_id: str, page_no: int, lang: str = "eng") -> str:
+    """Attempt Tesseract OCR on a PIL image. Returns extracted text or ''."""
     try:
         import pytesseract  # type: ignore[import]
-        from PIL import Image  # type: ignore[import]
-
-        # Render at 300 dpi.
-        pil_image = page.to_image(resolution=300).original
-        if not isinstance(pil_image, Image.Image):
-            pil_image = Image.fromarray(pil_image)
 
         # Deskew via pillow-based heuristic if available.
         try:
@@ -37,7 +31,7 @@ def _ocr_page(page, doc_id: str, page_no: int) -> str:
         except Exception:
             pass
 
-        text = pytesseract.image_to_string(pil_image, lang="eng")
+        text = pytesseract.image_to_string(pil_image, lang=lang)
         return _clean_text(text)
     except ImportError:
         logger.warning(
@@ -48,6 +42,32 @@ def _ocr_page(page, doc_id: str, page_no: int) -> str:
         return ""
     except Exception as exc:
         logger.warning("OCR failed for doc=%s page=%d: %s", doc_id, page_no, exc)
+        return ""
+
+
+def _ocr_page(page, doc_id: str, page_no: int) -> str:
+    """Attempt Tesseract OCR on a pdfplumber page. Returns extracted text or ''."""
+    try:
+        from PIL import Image  # type: ignore[import]
+
+        pil_image = page.to_image(resolution=300).original
+        if not isinstance(pil_image, Image.Image):
+            try:
+                pil_image = Image.fromarray(pil_image)
+            except Exception:
+                logger.warning(
+                    "OCR render did not return a PIL-compatible image for doc=%s page=%d",
+                    doc_id,
+                    page_no,
+                )
+                return ""
+        return ocr_image(pil_image, doc_id=doc_id, page_no=page_no, lang="eng")
+    except ImportError:
+        logger.warning(
+            "Pillow not available — OCR skipped for doc=%s page=%d",
+            doc_id,
+            page_no,
+        )
         return ""
 
 

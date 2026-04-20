@@ -6,7 +6,9 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from operation_lens_v2.api.schemas import EmailThreadIngestRequest, IngestRequest
 from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion.email_threads import ingest_email_thread_parquet
-from operation_lens_v2.ingestion.pipeline import ingest_corpus, ingest_pdf
+from operation_lens_v2.ingestion import duck_store
+from operation_lens_v2.ingestion.image_ingest import ingest_image
+from operation_lens_v2.ingestion.pipeline import ingest_corpus, ingest_pdf, ingest_tabular
 from operation_lens_v2.runtime import reset_duck_connection
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -24,7 +26,7 @@ def _sanitise_case_ref(case_ref: str) -> str:
 def _build_upload_path(case_ref: str, original_name: str) -> Path:
     raw_filename = Path(original_name or "upload.pdf").name
     suffix = Path(raw_filename).suffix.lower()
-    if suffix not in {".pdf", ".parquet"}:
+    if suffix not in {".pdf", ".parquet", ".csv", ".tsv", ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
         suffix = ".pdf"
     filename = f"{Path(raw_filename).stem or 'upload'}{suffix}"
 
@@ -41,16 +43,30 @@ def _build_upload_path(case_ref: str, original_name: str) -> Path:
 
 @router.post("/file")
 async def ingest_file_endpoint(payload: IngestRequest) -> dict[str, object]:
-    """Ingest a single PDF file into the evidence store."""
+    """Ingest a single supported file into the evidence store."""
     pdf_path = Path(payload.pdf_path)
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail=f"PDF file not found: {payload.pdf_path}")
-    result = await ingest_pdf(
-        pdf_path,
-        case_ref=payload.case_ref,
-        case_name=payload.case_name,
-        force=payload.force,
-    )
+    lower_suffix = pdf_path.suffix.lower()
+    if lower_suffix in {".csv", ".tsv"}:
+        result = await ingest_tabular(
+            pdf_path,
+            case_ref=payload.case_ref,
+            case_name=payload.case_name,
+        )
+    elif lower_suffix in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
+        result = await ingest_image(
+            pdf_path,
+            case_ref=payload.case_ref,
+            case_name=payload.case_name,
+        )
+    else:
+        result = await ingest_pdf(
+            pdf_path,
+            case_ref=payload.case_ref,
+            case_name=payload.case_name,
+            force=payload.force,
+        )
     reset_duck_connection(settings.duckdb_path)
     return result
 
@@ -112,8 +128,11 @@ async def ingest_upload_endpoint(
 
     filename = Path(file.filename or "").name
     suffix = Path(filename).suffix.lower()
-    if suffix not in {".pdf", ".parquet"}:
-        raise HTTPException(status_code=400, detail="Only PDF and Parquet uploads are supported")
+    if suffix not in {".pdf", ".parquet", ".csv", ".tsv", ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF, image, CSV, TSV and Parquet uploads are supported",
+        )
 
     destination = _build_upload_path(resolved_case_ref, filename)
     try:
@@ -130,6 +149,18 @@ async def ingest_upload_endpoint(
             case_name=case_name,
             force=force,
         )
+    elif suffix in {".csv", ".tsv"}:
+        result = await ingest_tabular(
+            destination,
+            case_ref=resolved_case_ref,
+            case_name=case_name,
+        )
+    elif suffix in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
+        result = await ingest_image(
+            destination,
+            case_ref=resolved_case_ref,
+            case_name=case_name,
+        )
     else:
         result = await ingest_pdf(
             destination,
@@ -143,3 +174,13 @@ async def ingest_upload_endpoint(
         "filename": destination.name,
         **result,
     }
+
+
+@router.get("/status/{doc_id}")
+async def ingest_status(doc_id: str) -> dict[str, object]:
+    """Return latest ingestion event status for one document id."""
+    con = duck_store.init_db(settings.duckdb_path)
+    event = duck_store.get_latest_ingestion_for_doc(con, doc_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="No ingestion event found for document")
+    return {"doc_id": doc_id, "status": event.get("status"), "event": event}

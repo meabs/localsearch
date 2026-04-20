@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -18,6 +19,30 @@ logger = logging.getLogger(__name__)
 _EMAIL_ANGLE_RE = re.compile(r"<([^<>@\s]+@[^<>@\s]+)>")
 _EMAIL_BRACKET_RE = re.compile(r"\[([^][]+@[^][]+)\]")
 _WHITESPACE_RE = re.compile(r"\s+")
+
+
+@dataclass(slots=True)
+class EmailMessage:
+    sender: str
+    recipients: list[str]
+    subject: str
+    timestamp: str
+    body: str
+
+
+@dataclass(slots=True)
+class AttachmentRef:
+    filename: str
+    mime_type: str
+    size: int
+
+
+@dataclass(slots=True)
+class ThreadDocument:
+    thread_id: str
+    subject: str
+    messages: list[EmailMessage]
+    attachments: list[AttachmentRef] = field(default_factory=list)
 
 
 def _format_message_text(

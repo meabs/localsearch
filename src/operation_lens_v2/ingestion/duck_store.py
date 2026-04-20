@@ -25,9 +25,12 @@ CREATE TABLE IF NOT EXISTS documents (
   filename TEXT NOT NULL,
   filepath TEXT NOT NULL,
   classification TEXT DEFAULT 'OFFICIAL',
+  format TEXT DEFAULT 'pdf',
   page_count INTEGER,
   ingested_at TIMESTAMP DEFAULT now(),
-  ocr_used BOOLEAN DEFAULT false
+  ocr_used BOOLEAN DEFAULT false,
+  ocr_failed BOOLEAN DEFAULT false,
+  thumbnail_blob BLOB
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -128,6 +131,7 @@ def init_db(path: str) -> duckdb.DuckDBPyConnection:
     _ensure_ingestion_events_table(con)
     _ensure_entity_review_columns(con)
     _ensure_graph_indexes(con)
+    _ensure_document_columns(con)
     try:
         con.execute("PRAGMA create_fts_index('chunks', 'chunk_id', 'text');")
     except duckdb.CatalogException:
@@ -167,6 +171,18 @@ def _ensure_temporal_columns(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE relationships ADD COLUMN valid_from TIMESTAMP;",
         "ALTER TABLE relationships ADD COLUMN valid_to TIMESTAMP;",
         "ALTER TABLE relationship_evidence ADD COLUMN event_time TIMESTAMP;",
+    ):
+        try:
+            con.execute(ddl)
+        except duckdb.CatalogException:
+            pass
+
+
+def _ensure_document_columns(con: duckdb.DuckDBPyConnection) -> None:
+    for ddl in (
+        "ALTER TABLE documents ADD COLUMN format TEXT DEFAULT 'pdf';",
+        "ALTER TABLE documents ADD COLUMN ocr_failed BOOLEAN DEFAULT false;",
+        "ALTER TABLE documents ADD COLUMN thumbnail_blob BLOB;",
     ):
         try:
             con.execute(ddl)
@@ -476,13 +492,29 @@ def upsert_document(
     page_count: int,
     ocr_used: bool,
     case_id: str | None = None,
+    doc_format: str = "pdf",
+    ocr_failed: bool = False,
+    thumbnail_blob: bytes | None = None,
 ) -> None:
     con.execute(
         """
-        INSERT OR REPLACE INTO documents (doc_id, case_id, filename, filepath, page_count, ocr_used)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO documents (
+          doc_id, case_id, filename, filepath, format, page_count,
+          ocr_used, ocr_failed, thumbnail_blob
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [doc_id, case_id, filename, filepath, page_count, ocr_used],
+        [
+            doc_id,
+            case_id,
+            filename,
+            filepath,
+            doc_format,
+            page_count,
+            ocr_used,
+            ocr_failed,
+            thumbnail_blob,
+        ],
     )
 
 
@@ -749,6 +781,25 @@ def get_ingestion_event(
         WHERE e.event_id = ?
         """,
         [event_id],
+    ).fetchone()
+    return _row_to_ingestion_event(row) if row else None
+
+
+def get_latest_ingestion_for_doc(
+    con: duckdb.DuckDBPyConnection,
+    doc_id: str,
+) -> dict[str, object] | None:
+    row = con.execute(
+        f"""
+        SELECT {_INGESTION_EVENT_COLUMNS}
+        FROM ingestion_events e
+        LEFT JOIN cases c ON c.case_id = e.case_id
+        LEFT JOIN documents d ON d.doc_id = e.doc_id
+        WHERE e.doc_id = ?
+        ORDER BY e.started_at DESC NULLS LAST
+        LIMIT 1
+        """,
+        [doc_id],
     ).fetchone()
     return _row_to_ingestion_event(row) if row else None
 
