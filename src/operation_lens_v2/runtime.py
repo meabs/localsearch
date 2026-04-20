@@ -29,6 +29,17 @@ def get_duck_connection(path: str):
     return con
 
 
+def reset_duck_connection(path: str) -> None:
+    resolved = str(Path(path))
+    con = _duck_connections.pop(resolved, None)
+    if con is None:
+        return
+    try:
+        con.close()
+    except Exception:
+        logger.debug("DuckDB connection close failed during reset", exc_info=True)
+
+
 def get_vector_store(path: str) -> VectorStore:
     resolved = str(Path(path))
     store = _vector_stores.get(resolved)

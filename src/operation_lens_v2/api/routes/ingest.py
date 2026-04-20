@@ -7,6 +7,7 @@ from operation_lens_v2.api.schemas import EmailThreadIngestRequest, IngestReques
 from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion.email_threads import ingest_email_thread_parquet
 from operation_lens_v2.ingestion.pipeline import ingest_corpus, ingest_pdf
+from operation_lens_v2.runtime import reset_duck_connection
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 UPLOAD_FILE_PARAM = File(...)
@@ -44,12 +45,14 @@ async def ingest_file_endpoint(payload: IngestRequest) -> dict[str, object]:
     pdf_path = Path(payload.pdf_path)
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail=f"PDF file not found: {payload.pdf_path}")
-    return await ingest_pdf(
+    result = await ingest_pdf(
         pdf_path,
         case_ref=payload.case_ref,
         case_name=payload.case_name,
         force=payload.force,
     )
+    reset_duck_connection(settings.duckdb_path)
+    return result
 
 
 @router.post("/corpus")
@@ -64,6 +67,7 @@ async def ingest_corpus_endpoint(payload: IngestRequest) -> dict[str, object]:
         case_name=payload.case_name,
         force=payload.force,
     )
+    reset_duck_connection(settings.duckdb_path)
     return {"ingested": len(results), "results": results}
 
 
@@ -78,12 +82,14 @@ async def ingest_email_threads_file_endpoint(payload: EmailThreadIngestRequest) 
         )
     if parquet_path.suffix.lower() != ".parquet":
         raise HTTPException(status_code=400, detail="Only .parquet files are supported")
-    return await ingest_email_thread_parquet(
+    result = await ingest_email_thread_parquet(
         parquet_path,
         case_ref=payload.case_ref,
         case_name=payload.case_name,
         force=payload.force,
     )
+    reset_duck_connection(settings.duckdb_path)
+    return result
 
 
 # Legacy endpoint — keep for backwards compatibility with existing scripts.
@@ -99,7 +105,7 @@ async def ingest_upload_endpoint(
     case_name: str | None = CASE_NAME_FORM,
     force: bool = FORCE_FORM,
 ) -> dict[str, object]:
-    """Accept a PDF upload directly from the browser and ingest it."""
+    """Accept a PDF or Parquet upload directly from the browser and ingest it."""
     resolved_case_ref = case_ref.strip()
     if not resolved_case_ref:
         raise HTTPException(status_code=400, detail="case_ref is required")
@@ -131,6 +137,7 @@ async def ingest_upload_endpoint(
             case_name=case_name,
             force=force,
         )
+    reset_duck_connection(settings.duckdb_path)
     return {
         "stored_path": str(destination),
         "filename": destination.name,

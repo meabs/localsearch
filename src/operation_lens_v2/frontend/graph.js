@@ -13,6 +13,10 @@
   const colorCache = Object.create(null);
   let schemaColors = Object.create(null);
 
+  function setGraphStatus(message) {
+    cyRoot.innerHTML = `<div class="timeline-empty">${escHtml(message)}</div>`;
+  }
+
   function apiUrl(path) {
     const explicit = window.LENS_API_BASE;
     if (explicit && typeof explicit === "string") {
@@ -408,8 +412,9 @@
     renderAttachments(detail, node);
   }
 
-  async function loadNetwork(entityName = "") {
-    const q = entityName ? `?entity=${encodeURIComponent(entityName)}&hops=2&limit=140` : "?limit=140";
+  async function loadNetwork(entityName = "", options = {}) {
+    setGraphStatus(entityName ? `Loading network for ${entityName}...` : "Loading graph overview...");
+    const q = entityName ? `?entity=${encodeURIComponent(entityName)}&hops=2&limit=100` : "?limit=60";
     const resp = await fetch(apiUrl(`/graph/network${q}`));
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
@@ -452,12 +457,23 @@
       }).slice(0, 4);
     });
     const edges = Array.from(collapsedByKey.values());
+    if (!entityName && options.autoFocus !== false && nodes.length) {
+      const focusNode = [...nodes].sort((a, b) => {
+        const mentionDelta = Number(b.mention_count || 0) - Number(a.mention_count || 0);
+        if (mentionDelta !== 0) return mentionDelta;
+        return String(a.label || "").localeCompare(String(b.label || ""));
+      })[0];
+      if (focusNode?.label) {
+        if (input) input.value = focusNode.label;
+        return loadNetwork(focusNode.label, { autoFocus: false });
+      }
+    }
     if (cy) cy.destroy();
     if (!window.cytoscape) {
-      cyRoot.innerHTML =
-        '<div class="timeline-empty">Graph library failed to load (Cytoscape CDN unavailable).</div>';
+      setGraphStatus("Graph library failed to load (Cytoscape unavailable).");
       return;
     }
+    const useFocusedLayout = Boolean(entityName);
     cy = window.cytoscape({
       container: cyRoot,
       elements: [
@@ -520,7 +536,7 @@
             "target-arrow-shape": "triangle",
             "arrow-scale": 0.7,
             "curve-style": "bezier",
-            label: "data(type_label)",
+            label: "",
             "font-size": 8,
             color: "#d6e3ee",
             "text-background-color": "#06080a",
@@ -567,22 +583,32 @@
           },
         },
       ],
-      layout: {
-        name: "cose",
-        animate: false,
-        fit: true,
-        padding: 36,
-        randomize: true,
-        componentSpacing: 220,
-        nodeRepulsion: () => 14000,
-        idealEdgeLength: () => 120,
-        edgeElasticity: () => 80,
-        gravity: 0.35,
-        numIter: 2800,
-        initialTemp: 220,
-        coolingFactor: 0.95,
-        minTemp: 1.0,
-      },
+      layout: useFocusedLayout
+        ? {
+            name: "cose",
+            animate: false,
+            fit: true,
+            padding: 36,
+            randomize: true,
+            componentSpacing: 180,
+            nodeRepulsion: () => 11000,
+            idealEdgeLength: () => 110,
+            edgeElasticity: () => 70,
+            gravity: 0.4,
+            numIter: 1400,
+            initialTemp: 180,
+            coolingFactor: 0.95,
+            minTemp: 1.0,
+          }
+        : {
+            name: "concentric",
+            fit: true,
+            padding: 40,
+            minNodeSpacing: 28,
+            concentric: (node) => Number(node.data("mention_count") || 0),
+            levelWidth: () => 3,
+            animate: false,
+          },
     });
     setDetail(null, edges, nodes, null);
     cy.on("tap", "node", (evt) => {

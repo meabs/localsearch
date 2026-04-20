@@ -8,7 +8,7 @@ from operation_lens_v2.ingestion.embedder import embed_text
 from operation_lens_v2.query.claim_validator import _extract_claims_from_answer
 from operation_lens_v2.query.llm_router import _local_ollama_analysis
 from operation_lens_v2.query.retriever_vector import retrieve_vector
-from operation_lens_v2.runtime import close_runtime_resources
+from operation_lens_v2.runtime import close_runtime_resources, get_duck_connection, reset_duck_connection
 
 
 class _FakeResponse:
@@ -151,3 +151,28 @@ async def test_embed_and_llm_calls_reuse_same_http_client(monkeypatch) -> None:
     assert len(created_clients) == 1
 
     await close_runtime_resources()
+
+
+def test_reset_duck_connection_drops_cached_connection(monkeypatch, tmp_path) -> None:
+    closed: list[str] = []
+
+    class FakeConnection:
+        def execute(self, sql: str):
+            return self
+
+        def close(self) -> None:
+            closed.append("closed")
+
+    monkeypatch.setattr(duck_store.duckdb, "connect", lambda _: FakeConnection())
+
+    path = str(tmp_path / "runtime-reset.duckdb")
+    first = get_duck_connection(path)
+    second = get_duck_connection(path)
+
+    assert first is second
+
+    reset_duck_connection(path)
+    third = get_duck_connection(path)
+
+    assert closed == ["closed"]
+    assert third is not first
