@@ -1,4 +1,16 @@
 (function () {
+  if (window.cytoscape) {
+    try {
+      if (window.cytoscapeFcose) window.cytoscape.use(window.cytoscapeFcose);
+      if (window.cytoscapeCoseBilkent) window.cytoscape.use(window.cytoscapeCoseBilkent);
+      if (window.cytoscapeDagre) window.cytoscape.use(window.cytoscapeDagre);
+      // navigator plugin is optional and not always exposed as a plain extension factory.
+      // Registering an incompatible bundle can cause core init errors (isHeadless on null).
+    } catch (_) {
+      // Best effort plugin registration - graph still renders with built-ins.
+    }
+  }
+
   const cyRoot = document.getElementById("cy");
   const detail = document.getElementById("node-detail");
   const form = document.getElementById("graph-form");
@@ -477,6 +489,15 @@
     });
   }
 
+  function currentLayoutConfig() {
+    return window.LensGraphLayout?.registry?.[graphView.layout] || { name: "fcose", animate: false, fit: true };
+  }
+
+  function applyLayout() {
+    if (!cy) return;
+    cy.layout(currentLayoutConfig()).run();
+  }
+
   async function refreshAtlasCases() {
     if (!caseSelect) return;
     try {
@@ -675,7 +696,7 @@
         },
       ],
       layout: {
-        ...(window.LensGraphLayout?.registry?.[graphView.layout] || { name: "fcose", animate: false, fit: true }),
+        ...currentLayoutConfig(),
         animate: false,
         fit: true,
         padding: 36,
@@ -728,7 +749,7 @@
     layoutSelect.addEventListener("change", () => {
       graphView.layout = layoutSelect.value || "fcose";
       persistGraphView();
-      loadNetwork((input?.value || "").trim()).catch(() => {});
+      applyLayout();
     });
   }
   if (confidenceSlider) {
@@ -749,9 +770,7 @@
   }
   if (relayoutBtn) {
     relayoutBtn.addEventListener("click", () => {
-      if (!cy) return;
-      const layoutConfig = window.LensGraphLayout?.registry?.[graphView.layout] || { name: "fcose" };
-      cy.layout(layoutConfig).run();
+      applyLayout();
     });
   }
   if (fitBtn) {
