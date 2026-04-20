@@ -10,6 +10,13 @@ class IngestRequest(BaseModel):
     force: bool = False
 
 
+class EmailThreadIngestRequest(BaseModel):
+    parquet_path: str
+    case_ref: str = "UNASSIGNED"
+    case_name: str | None = None
+    force: bool = False
+
+
 class QueryRequest(BaseModel):
     query: str
     case_ref: str | None = None

@@ -28,6 +28,10 @@ function setInlineStatus(element, tone, message) {
   element.textContent = message;
 }
 
+function describeUploadType(fileName) {
+  return String(fileName || "").toLowerCase().endsWith(".parquet") ? "thread parquet" : "PDF";
+}
+
 function setSelectedCase(caseRef, options = {}) {
   selectedCaseRef = caseRef || "";
   if (caseUploadSelect) {
@@ -217,7 +221,7 @@ if (caseUploadForm) {
       return;
     }
     if (!file) {
-      setInlineStatus(caseUploadStatus, "error", "Select a PDF document to upload.");
+      setInlineStatus(caseUploadStatus, "error", "Select a PDF or thread Parquet file to upload.");
       return;
     }
 
@@ -226,7 +230,11 @@ if (caseUploadForm) {
       submitButton.disabled = true;
       submitButton.textContent = "Uploading...";
     }
-    setInlineStatus(caseUploadStatus, "muted", `Uploading ${file.name} to ${caseRef}...`);
+    setInlineStatus(
+      caseUploadStatus,
+      "muted",
+      `Uploading ${file.name} (${describeUploadType(file.name)}) to ${caseRef}...`,
+    );
 
     const formData = new FormData();
     formData.append("file", file);

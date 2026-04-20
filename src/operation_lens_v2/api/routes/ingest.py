@@ -3,8 +3,9 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from operation_lens_v2.api.schemas import IngestRequest
+from operation_lens_v2.api.schemas import EmailThreadIngestRequest, IngestRequest
 from operation_lens_v2.config import settings
+from operation_lens_v2.ingestion.email_threads import ingest_email_thread_parquet
 from operation_lens_v2.ingestion.pipeline import ingest_corpus, ingest_pdf
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -20,9 +21,11 @@ def _sanitise_case_ref(case_ref: str) -> str:
 
 
 def _build_upload_path(case_ref: str, original_name: str) -> Path:
-    filename = Path(original_name or "upload.pdf").name
-    if not filename.lower().endswith(".pdf"):
-        filename = f"{Path(filename).stem or 'upload'}.pdf"
+    raw_filename = Path(original_name or "upload.pdf").name
+    suffix = Path(raw_filename).suffix.lower()
+    if suffix not in {".pdf", ".parquet"}:
+        suffix = ".pdf"
+    filename = f"{Path(raw_filename).stem or 'upload'}{suffix}"
 
     case_dir = settings.pdf_root_obj / _sanitise_case_ref(case_ref)
     case_dir.mkdir(parents=True, exist_ok=True)
@@ -64,6 +67,25 @@ async def ingest_corpus_endpoint(payload: IngestRequest) -> dict[str, object]:
     return {"ingested": len(results), "results": results}
 
 
+@router.post("/email-threads/file")
+async def ingest_email_threads_file_endpoint(payload: EmailThreadIngestRequest) -> dict[str, object]:
+    """Ingest a parquet file containing email threads into the graph store."""
+    parquet_path = Path(payload.parquet_path)
+    if not parquet_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Parquet file not found: {payload.parquet_path}",
+        )
+    if parquet_path.suffix.lower() != ".parquet":
+        raise HTTPException(status_code=400, detail="Only .parquet files are supported")
+    return await ingest_email_thread_parquet(
+        parquet_path,
+        case_ref=payload.case_ref,
+        case_name=payload.case_name,
+        force=payload.force,
+    )
+
+
 # Legacy endpoint — keep for backwards compatibility with existing scripts.
 @router.post("")
 async def ingest_endpoint(payload: IngestRequest) -> dict[str, object]:
@@ -83,8 +105,9 @@ async def ingest_upload_endpoint(
         raise HTTPException(status_code=400, detail="case_ref is required")
 
     filename = Path(file.filename or "").name
-    if not filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".pdf", ".parquet"}:
+        raise HTTPException(status_code=400, detail="Only PDF and Parquet uploads are supported")
 
     destination = _build_upload_path(resolved_case_ref, filename)
     try:
@@ -94,12 +117,20 @@ async def ingest_upload_endpoint(
     finally:
         await file.close()
 
-    result = await ingest_pdf(
-        destination,
-        case_ref=resolved_case_ref,
-        case_name=case_name,
-        force=force,
-    )
+    if suffix == ".parquet":
+        result = await ingest_email_thread_parquet(
+            destination,
+            case_ref=resolved_case_ref,
+            case_name=case_name,
+            force=force,
+        )
+    else:
+        result = await ingest_pdf(
+            destination,
+            case_ref=resolved_case_ref,
+            case_name=case_name,
+            force=force,
+        )
     return {
         "stored_path": str(destination),
         "filename": destination.name,

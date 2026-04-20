@@ -575,9 +575,9 @@
                       <div>
                         <div class="panel-overline">Evidence intake</div>
                         <div class="panel-title">Upload case documents</div>
-                        <p class="panel-copy">Choose a case, select one PDF, and the system will store and ingest it locally.</p>
+                        <p class="panel-copy">Choose a case, then upload either a PDF or an email-thread Parquet file for local ingestion.</p>
                       </div>
-                      <div class="panel-chip">PDF only</div>
+                      <div class="panel-chip">PDF + Parquet</div>
                     </div>
 
                     <form id="case-upload-form">
@@ -587,13 +587,13 @@
                       </div>
                       <div class="field-group">
                         <label class="field-label" for="case-upload-file">Document</label>
-                        <input type="file" id="case-upload-file" accept="application/pdf,.pdf" />
+                        <input type="file" id="case-upload-file" accept="application/pdf,.pdf,application/octet-stream,.parquet" />
                       </div>
                       <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
                         Upload and ingest
                       </button>
                     </form>
-                    <div id="case-upload-status" class="inline-status inline-status-muted">Choose a case and a PDF to begin.</div>
+                    <div id="case-upload-status" class="inline-status inline-status-muted">Choose a case and a PDF or Parquet file to begin.</div>
                   </div>
                 </div>
               </div>

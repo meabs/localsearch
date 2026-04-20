@@ -78,3 +78,47 @@ async def test_ingest_upload_endpoint_stores_pdf_then_calls_pipeline(tmp_path, m
     assert captured["case_ref"] == "OP_UPLOAD"
     assert captured["case_name"] == "Upload Case"
     assert captured["force"] is False
+
+
+@pytest.mark.asyncio
+async def test_ingest_upload_endpoint_stores_parquet_then_calls_pipeline(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "pdf_root", str(tmp_path / "pdfs"))
+
+    captured: dict[str, object] = {}
+
+    async def fake_ingest_email_thread_parquet(parquet_path, *, case_ref, case_name, force):
+        captured["parquet_path"] = parquet_path
+        captured["case_ref"] = case_ref
+        captured["case_name"] = case_name
+        captured["force"] = force
+        return {
+            "case_ref": case_ref,
+            "threads": 3,
+            "chunks": 9,
+            "relationships": 7,
+            "skipped": 0,
+        }
+
+    monkeypatch.setattr(
+        "operation_lens_v2.api.routes.ingest.ingest_email_thread_parquet",
+        fake_ingest_email_thread_parquet,
+    )
+
+    upload = UploadFile(filename="threads.parquet", file=BytesIO(b"PAR1 test payload"))
+
+    result = await ingest_upload_endpoint(
+        file=upload,
+        case_ref="OP_UPLOAD",
+        case_name="Upload Case",
+        force=False,
+    )
+
+    stored_path = tmp_path / "pdfs" / "OP_UPLOAD" / "threads.parquet"
+    assert stored_path.exists()
+    assert stored_path.read_bytes() == b"PAR1 test payload"
+    assert result["stored_path"] == str(stored_path)
+    assert result["filename"] == "threads.parquet"
+    assert captured["parquet_path"] == stored_path
+    assert captured["case_ref"] == "OP_UPLOAD"
+    assert captured["case_name"] == "Upload Case"
+    assert captured["force"] is False
