@@ -4,6 +4,11 @@
   const form = document.getElementById("graph-form");
   const input = document.getElementById("graph-entity-input");
   const caseSelect = document.getElementById("graph-case-select");
+  const layoutSelect = document.getElementById("graph-layout-select");
+  const confidenceSlider = document.getElementById("graph-confidence");
+  const crossDocToggle = document.getElementById("graph-cross-doc-toggle");
+  const relayoutBtn = document.getElementById("graph-relayout-btn");
+  const fitBtn = document.getElementById("graph-fit-btn");
   if (!cyRoot || !detail) return;
 
   let cy = null;
@@ -14,6 +19,13 @@
   // the first render after boot still lines up with the Cases desk.
   let atlasCaseOverride = null;
   let knownAtlasCases = [];
+  const layoutStore = window.LensGraphLayout;
+  const savedLayout = layoutStore?.load?.() || {};
+  const graphView = {
+    layout: savedLayout.layout || "fcose",
+    confidence: Number(savedLayout.confidence ?? 0.35),
+    crossDoc: savedLayout.crossDoc ?? true,
+  };
   // Colours come from the backend schema (first-party) with a deterministic
   // HSL hash fallback - any new entity type gets a stable colour automatically.
   const FALLBACK_COLOR = "#5b6b7d";
@@ -82,6 +94,7 @@
           <div style="margin-top:6px;font-size:13px;color:var(--ink-soft);line-height:1.55;">
             ${citation.span_text || "No span excerpt available."}
           </div>
+          <button type="button" class="lens-open-source" data-doc-id="${escHtml(citation.doc_id || "")}" data-page="${escHtml(citation.page ?? 1)}" style="margin-top:8px;padding:4px 8px;border:1px solid var(--border-1);border-radius:8px;background:rgba(255,255,255,0.03);color:var(--ink-soft);font-size:11px;cursor:pointer;">Open source</button>
         </div>
       `)
       .join("");
@@ -354,6 +367,18 @@
         <div style="margin-top:12px;color:var(--ink-faint);font-size:11px;letter-spacing:.1em;text-transform:uppercase;">Top supporting citations</div>
         ${renderCitationList(edge.citations || [])}
       `;
+      detail.querySelectorAll(".lens-open-source").forEach((button) => {
+        button.addEventListener("click", () => {
+          const docId = button.getAttribute("data-doc-id") || "";
+          const page = Number(button.getAttribute("data-page") || "1");
+          if (!docId) return;
+          window.dispatchEvent(
+            new CustomEvent("lens:open-source", {
+              detail: { doc_id: docId, page: Number.isFinite(page) ? page : 1 },
+            }),
+          );
+        });
+      });
       return;
     }
     const linked = edges.filter((e) => e.source === node.id || e.target === node.id);
@@ -444,6 +469,14 @@
     caseSelect.value = current;
   }
 
+  function persistGraphView() {
+    layoutStore?.save?.({
+      layout: graphView.layout,
+      confidence: graphView.confidence,
+      crossDoc: graphView.crossDoc,
+    });
+  }
+
   async function refreshAtlasCases() {
     if (!caseSelect) return;
     try {
@@ -477,7 +510,13 @@
       return;
     }
     const nodes = data.nodes || [];
-    const rawEdges = data.edges || [];
+    const rawEdges = (data.edges || []).filter((edge) => {
+      const conf = Number(edge.confidence || 0);
+      const isCrossDoc = Number(edge.distinct_doc_count || 0) > 1;
+      if (conf < graphView.confidence) return false;
+      if (!graphView.crossDoc && isCrossDoc) return false;
+      return true;
+    });
     // Collapse duplicate edges between the same pair/type to reduce visual mesh.
     const collapsedByKey = new Map();
     rawEdges.forEach((edge) => {
@@ -539,8 +578,10 @@
             type_label: String(e.type || "").replaceAll("_", " "),
             confidence: Number(e.confidence || 0),
             evidence_count: Number(e.evidence_count || 0),
+            distinct_doc_count: Number(e.distinct_doc_count || 0),
             citations: e.citations || [],
           },
+          classes: Number(e.distinct_doc_count || 0) > 1 ? "cross-doc-edge" : "",
         })),
       ],
       style: [
@@ -588,6 +629,16 @@
           },
         },
         {
+          selector: "edge.cross-doc-edge",
+          style: {
+            "line-style": "dashed",
+            "line-color": "#f0b840",
+            "target-arrow-color": "#f0b840",
+            width: (ele) => 1.2 + Math.min(2.4, (ele.data("confidence") || 0) * 2),
+            opacity: 0.9,
+          },
+        },
+        {
           selector: ".selected",
           style: {
             "border-width": 3,
@@ -624,11 +675,11 @@
         },
       ],
       layout: {
-        name: "cose",
+        ...(window.LensGraphLayout?.registry?.[graphView.layout] || { name: "fcose", animate: false, fit: true }),
         animate: false,
         fit: true,
         padding: 36,
-        randomize: true,
+        randomize: false,
         componentSpacing: 220,
         nodeRepulsion: () => 14000,
         idealEdgeLength: () => 120,
@@ -669,6 +720,43 @@
         cy.elements().removeClass("selected edge-selected dimmed");
         setDetail(null, edges, nodes, null);
       }
+    });
+  }
+
+  if (layoutSelect) {
+    layoutSelect.value = graphView.layout;
+    layoutSelect.addEventListener("change", () => {
+      graphView.layout = layoutSelect.value || "fcose";
+      persistGraphView();
+      loadNetwork((input?.value || "").trim()).catch(() => {});
+    });
+  }
+  if (confidenceSlider) {
+    confidenceSlider.value = String(graphView.confidence);
+    confidenceSlider.addEventListener("input", () => {
+      graphView.confidence = Number(confidenceSlider.value || 0.35);
+      persistGraphView();
+      loadNetwork((input?.value || "").trim()).catch(() => {});
+    });
+  }
+  if (crossDocToggle) {
+    crossDocToggle.checked = Boolean(graphView.crossDoc);
+    crossDocToggle.addEventListener("change", () => {
+      graphView.crossDoc = crossDocToggle.checked;
+      persistGraphView();
+      loadNetwork((input?.value || "").trim()).catch(() => {});
+    });
+  }
+  if (relayoutBtn) {
+    relayoutBtn.addEventListener("click", () => {
+      if (!cy) return;
+      const layoutConfig = window.LensGraphLayout?.registry?.[graphView.layout] || { name: "fcose" };
+      cy.layout(layoutConfig).run();
+    });
+  }
+  if (fitBtn) {
+    fitBtn.addEventListener("click", () => {
+      if (cy) cy.fit(undefined, 60);
     });
   }
 

@@ -33,3 +33,8 @@ class QueryRequest(BaseModel):
 class CreateCaseRequest(BaseModel):
     case_ref: str
     case_name: str
+
+
+class AuditBulkEntityRequest(BaseModel):
+    action: Literal["confirm", "reject"]
+    entity_ids: list[str]

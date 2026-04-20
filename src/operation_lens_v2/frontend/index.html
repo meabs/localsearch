@@ -138,6 +138,22 @@
                     <div class="canvas-title">Network projection</div>
                     <div class="canvas-status">Weighted by mentions and confidence</div>
                   </div>
+                  <div id="graph-layout-toolbar">
+                    <label>Layout
+                      <select id="graph-layout-select">
+                        <option value="fcose">fcose</option>
+                        <option value="cose-bilkent">cose-bilkent</option>
+                        <option value="dagre">dagre</option>
+                        <option value="concentric">concentric</option>
+                        <option value="circle">circle</option>
+                        <option value="breadthfirst">breadthfirst</option>
+                      </select>
+                    </label>
+                    <label>Confidence <input id="graph-confidence" type="range" min="0" max="1" step="0.05" value="0.35" /></label>
+                    <label><input id="graph-cross-doc-toggle" type="checkbox" checked /> Cross-doc</label>
+                    <button id="graph-relayout-btn" type="button">Re-layout</button>
+                    <button id="graph-fit-btn" type="button">Fit</button>
+                  </div>
                   <div id="cy"></div>
                   <div id="cy-overlay">Local render</div>
                 </div>
@@ -591,13 +607,16 @@
                     </div>
 
                     <form id="case-upload-form">
+                      <div id="case-upload-dropzone" class="entity-attach-dropzone" style="margin-bottom:12px;">
+                        <span>Drop files here: PDF, image (PNG/JPG/TIFF), CSV, email (.eml/.msg), email-thread Parquet.</span>
+                      </div>
                       <div class="field-group">
                         <label class="field-label" for="case-upload-select">Target case</label>
                         <select id="case-upload-select"></select>
                       </div>
                       <div class="field-group">
                         <label class="field-label" for="case-upload-file">Document</label>
-                        <input type="file" id="case-upload-file" accept="application/pdf,.pdf,application/octet-stream,.parquet" />
+                        <input type="file" id="case-upload-file" accept="application/pdf,.pdf,image/png,.png,image/jpeg,.jpg,.jpeg,image/bmp,.bmp,image/tiff,.tif,.tiff,text/csv,.csv,text/tab-separated-values,.tsv,application/octet-stream,.parquet" />
                       </div>
                       <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
                         Upload and ingest
@@ -768,13 +787,21 @@
   </script>
 
   <script src="/ui/confidence_badge.js?v=20260420-casescope"></script>
+  <script src="/ui/state_store.js?v=20260420-state"></script>
   <script src="/ui/evidence_panel.js?v=20260420-casescope"></script>
   <script src="/ui/case_manager.js?v=20260420-casescope"></script>
   <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+  <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+  <script src="https://unpkg.com/cytoscape-cose-bilkent@4.1.0/cytoscape-cose-bilkent.js"></script>
+  <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+  <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+  <script src="https://unpkg.com/cytoscape-navigator@2.0.2/cytoscape-navigator.js"></script>
+  <script src="/ui/graph_layout.js?v=20260420-layout"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="/ui/entity_map.js?v=20260420-casescope"></script>
   <script src="/ui/case_map.js?v=20260420-casescope"></script>
   <script src="/ui/graph.js?v=20260420-casescope"></script>
+  <script src="/ui/source_viewer.js?v=20260420-sourceviewer"></script>
   <script src="/ui/graph_insights.js?v=20260420-casescope"></script>
   <script src="/ui/timeline.js?v=20260420-casescope"></script>
   <script src="/ui/audit.js?v=20260420-audit-remove"></script>

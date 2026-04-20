@@ -309,6 +309,7 @@ def network(
               es.mention_count AS source_mentions,
               et.mention_count AS target_mentions,
               count(re.evidence_id) AS evidence_count,
+              count(DISTINCT re.doc_id) AS distinct_doc_count,
               la_src.attachment_id AS source_attachment_id,
               la_tgt.attachment_id AS target_attachment_id,
               es.latitude AS source_lat, es.longitude AS source_lon,
@@ -370,6 +371,7 @@ def network(
               es.mention_count AS source_mentions,
               et.mention_count AS target_mentions,
               count(re.evidence_id) AS evidence_count,
+              count(DISTINCT re.doc_id) AS distinct_doc_count,
               la_src.attachment_id AS source_attachment_id,
               la_tgt.attachment_id AS target_attachment_id,
               es.latitude AS source_lat, es.longitude AS source_lon,
@@ -409,9 +411,9 @@ def network(
                 "label": row[5],
                 "entity_type": row[7],
                 "mention_count": row[9],
-                "attachment_id": row[12],
-                "latitude": float(row[14]) if row[14] is not None else None,
-                "longitude": float(row[15]) if row[15] is not None else None,
+                "attachment_id": row[13],
+                "latitude": float(row[15]) if row[15] is not None else None,
+                "longitude": float(row[16]) if row[16] is not None else None,
             }
         if target_id not in nodes:
             nodes[target_id] = {
@@ -419,9 +421,9 @@ def network(
                 "label": row[6],
                 "entity_type": row[8],
                 "mention_count": row[10],
-                "attachment_id": row[13],
-                "latitude": float(row[16]) if row[16] is not None else None,
-                "longitude": float(row[17]) if row[17] is not None else None,
+                "attachment_id": row[14],
+                "latitude": float(row[17]) if row[17] is not None else None,
+                "longitude": float(row[18]) if row[18] is not None else None,
             }
         edges.append(
             {
@@ -431,6 +433,7 @@ def network(
                 "type": row[3],
                 "confidence": float(row[4]),
                 "evidence_count": int(row[11]),
+                "distinct_doc_count": int(row[12] or 0),
                 "citations": edge_citations.get(str(row[0]), []),
             }
         )

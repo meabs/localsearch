@@ -7,12 +7,20 @@
   const docIdsInput = document.getElementById("timeline-doc-ids");
   const container = document.getElementById("timeline-container");
   const statusEl = document.getElementById("timeline-status");
+  const state = window.LensStateStore?.createStore?.("lens:v1");
 
   if (!submitBtn || !container || !statusEl) return;
+
+  const initial = state?.get("timeline.filters", null);
+  if (initial) {
+    if (entityInput) entityInput.value = initial.entity || "";
+    if (docIdsInput) docIdsInput.value = initial.doc_ids || "";
+  }
 
   submitBtn.addEventListener("click", async () => {
     const entity = entityInput ? entityInput.value.trim() : "";
     const docIds = docIdsInput ? docIdsInput.value.trim() : "";
+    state?.set("timeline.filters", { entity, doc_ids: docIds });
 
     const params = new URLSearchParams();
     if (entity) params.set("entity", entity);

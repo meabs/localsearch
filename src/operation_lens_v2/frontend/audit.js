@@ -19,6 +19,7 @@
 
   let selectedEventId = "";
   let lowThreshold = 0.5;
+  const selectedEntities = new Set();
 
   function esc(value) {
     return String(value || "")
@@ -244,10 +245,20 @@
     }
     if (!entities.length) {
       auditEntities.innerHTML = '<div class="timeline-empty">No entities are linked to this ingestion yet.</div>';
+      selectedEntities.clear();
       return;
     }
 
-    auditEntities.innerHTML = entities
+    const actionBar = `
+      <div class="audit-bulk-bar">
+        <span id="audit-bulk-count">${selectedEntities.size} selected</span>
+        <button type="button" class="btn btn-secondary audit-bulk-confirm">Confirm all</button>
+        <button type="button" class="btn btn-ghost audit-bulk-reject">Reject all</button>
+        <button type="button" class="btn btn-ghost audit-bulk-clear">Clear</button>
+      </div>
+    `;
+
+    auditEntities.innerHTML = actionBar + entities
       .map((entity) => {
         const low = entity.low_confidence;
         const reviewed = entity.reviewed_at;
@@ -277,6 +288,7 @@
               <div class="${badgeClass}">${esc(badgeLabel)}</div>
             </div>
             <div class="doc-card-meta audit-entity-actions">
+              <label><input type="checkbox" class="audit-entity-check" data-entity-id="${esc(entity.entity_id)}" ${selectedEntities.has(entity.entity_id) ? "checked" : ""} /> Select</label>
               <span class="audit-mono">${esc(entity.entity_id)}</span>
               ${actionButton}
             </div>
@@ -284,6 +296,51 @@
         `;
       })
       .join("");
+
+    auditEntities.querySelectorAll(".audit-entity-check").forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        const entityId = checkbox.getAttribute("data-entity-id") || "";
+        if (!entityId) return;
+        if (checkbox.checked) selectedEntities.add(entityId);
+        else selectedEntities.delete(entityId);
+        const countEl = auditEntities.querySelector("#audit-bulk-count");
+        if (countEl) countEl.textContent = `${selectedEntities.size} selected`;
+      });
+    });
+
+    async function runBulk(action) {
+      if (!selectedEntities.size) return;
+      const resp = await fetch("/audit/entities/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, entity_ids: Array.from(selectedEntities) }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(body || `Bulk action failed (${resp.status})`);
+      }
+      selectedEntities.clear();
+      if (selectedEventId) await selectEvent(selectedEventId);
+    }
+
+    auditEntities.querySelector(".audit-bulk-confirm")?.addEventListener("click", async () => {
+      try {
+        await runBulk("confirm");
+      } catch (error) {
+        setStatus("error", String(error));
+      }
+    });
+    auditEntities.querySelector(".audit-bulk-reject")?.addEventListener("click", async () => {
+      try {
+        await runBulk("reject");
+      } catch (error) {
+        setStatus("error", String(error));
+      }
+    });
+    auditEntities.querySelector(".audit-bulk-clear")?.addEventListener("click", () => {
+      selectedEntities.clear();
+      renderEntities(entities);
+    });
 
     auditEntities.querySelectorAll(".audit-confirm-btn").forEach((button) => {
       button.addEventListener("click", async () => {

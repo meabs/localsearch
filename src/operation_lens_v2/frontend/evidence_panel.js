@@ -15,6 +15,7 @@ const submitButton = form ? form.querySelector("button[type='submit']") : null;
 const agentTracePanel = document.getElementById("agent-trace-panel");
 const agentTrace = document.getElementById("agent-trace");
 const agentTraceStatus = document.getElementById("agent-trace-status");
+const viewState = window.LensStateStore?.createStore?.("lens:v1");
 let inFlightController = null;
 const chatTurns = [];
 const CHAT_HISTORY_LIMIT = 12;
@@ -237,7 +238,7 @@ function formatAnswerText(rawAnswer) {
   return html || `<div class="answer-text">${escapeHtml(raw)}</div>`;
 }
 
-function renderClaim(claim) {
+function renderClaim(claim, claimId) {
   const status = claim.status || "UNSUPPORTED";
   const citations = claim.citations || [];
   const citationHtml = citations
@@ -255,7 +256,7 @@ function renderClaim(claim) {
     })
     .join("");
   return `
-    <div class="claim">
+    <div class="claim" data-claim-id="${escapeHtml(claimId)}">
       <div class="claim-head">
         <div class="claim-badge-row">${confidenceBadge(status)}</div>
         <div>confidence ${(claim.confidence ?? 0).toFixed(2)}</div>
@@ -275,7 +276,8 @@ function buildEvidenceItems(data) {
   const topResults = data.top_results || [];
   const claimRows = data.claims || [];
 
-  claimRows.forEach((claim) => {
+  claimRows.forEach((claim, claimIndex) => {
+    const claimId = `c-${claimIndex}`;
     (claim.citations || []).forEach((citation, idx) => {
       items.push({
         key: `${citation.doc_id || "unknown-doc"}|${citation.page ?? "?"}|${idx}`,
@@ -284,6 +286,7 @@ function buildEvidenceItems(data) {
         page: citation.page ?? "?",
         source: "claim-citation",
         text: citation.span_text || "",
+        claim_id: claimId,
       });
     });
   });
@@ -303,8 +306,11 @@ function buildEvidenceItems(data) {
   items.forEach((item) => {
     if (!item.text || !item.text.trim()) return;
     if (!byKey.has(item.key)) {
-      byKey.set(item.key, item);
+      byKey.set(item.key, { ...item, claim_ids: item.claim_id ? [item.claim_id] : [] });
+      return;
     }
+    const existing = byKey.get(item.key);
+    if (item.claim_id && !existing.claim_ids.includes(item.claim_id)) existing.claim_ids.push(item.claim_id);
   });
   return Array.from(byKey.values());
 }
@@ -320,7 +326,7 @@ function renderEvidencePanel(data) {
     .map((item) => {
       const text = escapeHtml(item.text).slice(0, 900);
       return `
-        <article class="evidence-card" data-evidence-key="${escapeHtml(item.key)}">
+        <article class="evidence-card" data-evidence-key="${escapeHtml(item.key)}" data-claim-id="${escapeHtml((item.claim_ids || []).join(" "))}">
           <div class="evidence-card-header">
             <span>${escapeHtml(item.doc_name || item.doc_id)} p.${escapeHtml(item.page)}</span>
             <span>${escapeHtml(item.source)}</span>
@@ -330,6 +336,35 @@ function renderEvidencePanel(data) {
       `;
     })
     .join("");
+}
+
+function clearClaimEvidenceHighlights() {
+  claims.querySelectorAll(".claim").forEach((el) => el.classList.remove("claim-active"));
+  evidenceChunks.querySelectorAll(".evidence-card").forEach((el) => {
+    el.classList.remove("evidence-active");
+    el.classList.remove("evidence-dimmed");
+  });
+}
+
+function activateClaimEvidence(claimId) {
+  clearClaimEvidenceHighlights();
+  if (!claimId) return;
+  const claimEl = claims.querySelector(`.claim[data-claim-id="${CSS.escape(claimId)}"]`);
+  if (claimEl) claimEl.classList.add("claim-active");
+  const evidenceEls = Array.from(evidenceChunks.querySelectorAll(".evidence-card"));
+  let firstMatch = null;
+  evidenceEls.forEach((el) => {
+    const ids = String(el.getAttribute("data-claim-id") || "")
+      .split(/\s+/)
+      .filter(Boolean);
+    if (ids.includes(claimId)) {
+      el.classList.add("evidence-active");
+      if (!firstMatch) firstMatch = el;
+    } else {
+      el.classList.add("evidence-dimmed");
+    }
+  });
+  if (firstMatch) firstMatch.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 function truncateChatText(text) {
@@ -452,6 +487,7 @@ if (form) {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const query = input.value.trim();
+    viewState?.set("brief.lastQuery", query);
     if (!query) return;
     const caseRef = (caseInput?.value || "").trim();
     const docId = (docIdInput?.value || "").trim();
@@ -537,16 +573,40 @@ if (form) {
         </div>
         <div class="answer-structured">${formatAnswerText(data.answer)}</div>
       `;
-      const claimItems = (data.claims || []).map((claim) => renderClaim(claim)).join("");
+      const claimItems = (data.claims || []).map((claim, idx) => renderClaim(claim, `c-${idx}`)).join("");
       claims.innerHTML = claimItems || '<div class="timeline-empty">No claims returned for this response.</div>';
       renderEvidencePanel(data);
+      claims.querySelectorAll(".claim").forEach((claimEl) => {
+        claimEl.addEventListener("click", () => {
+          activateClaimEvidence(claimEl.getAttribute("data-claim-id") || "");
+        });
+      });
+      evidenceChunks.querySelectorAll(".evidence-card").forEach((cardEl) => {
+        cardEl.addEventListener("click", () => {
+          const first = String(cardEl.getAttribute("data-claim-id") || "").split(/\s+/).filter(Boolean)[0];
+          if (first) activateClaimEvidence(first);
+        });
+      });
       pushChatTurn("assistant", data.answer || "No answer generated.");
       claims.querySelectorAll(".citation-link").forEach((el) => {
         el.addEventListener("click", () => {
           const key = el.getAttribute("data-evidence-key") || "";
           const snippet = el.textContent || "";
           focusEvidenceCard(key, snippet);
+          const card = key.split("|");
+          const docId = card[0] || "";
+          const page = Number(card[1] || "1");
+          if (docId) {
+            window.dispatchEvent(
+              new CustomEvent("lens:open-source", {
+                detail: { doc_id: docId, page: Number.isFinite(page) ? page : 1 },
+              }),
+            );
+          }
         });
+      });
+      window.addEventListener("keydown", (evt) => {
+        if (evt.key === "Escape") clearClaimEvidenceHighlights();
       });
       window.dispatchEvent(new CustomEvent("lens:query-result", { detail: data }));
     } catch (error) {
@@ -582,3 +642,5 @@ if (form) {
 
 renderChatThread();
 loadQueryTemplates().catch(() => {});
+const lastQuery = viewState?.get("brief.lastQuery", "");
+if (lastQuery && input && !input.value.trim()) input.value = lastQuery;

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from operation_lens_v2.api.schemas import AuditBulkEntityRequest
 from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion import duck_store
 from operation_lens_v2.runtime import get_duck_connection
@@ -126,3 +127,30 @@ def remove_entity(entity_id: str) -> dict[str, object]:
     if removed is None:
         raise HTTPException(status_code=404, detail="Unknown entity")
     return {"entity_id": entity_id, "removed": removed}
+
+
+@router.post("/entities/bulk")
+def bulk_entity_action(payload: AuditBulkEntityRequest) -> dict[str, object]:
+    """Confirm or reject entities in one transaction with partial-success reporting."""
+    con = get_duck_connection(settings.duckdb_path)
+    failed: list[dict[str, str]] = []
+    updated = 0
+    con.execute("BEGIN TRANSACTION;")
+    try:
+        for entity_id in payload.entity_ids:
+            try:
+                if payload.action == "confirm":
+                    result = duck_store.confirm_entity(con, entity_id)
+                else:
+                    result = duck_store.delete_entity_cascade(con, entity_id)
+                if result is None:
+                    failed.append({"entity_id": entity_id, "reason": "Unknown entity"})
+                else:
+                    updated += 1
+            except Exception as exc:
+                failed.append({"entity_id": entity_id, "reason": str(exc)})
+        con.execute("COMMIT;")
+    except Exception:
+        con.execute("ROLLBACK;")
+        raise
+    return {"updated": updated, "failed": failed}
