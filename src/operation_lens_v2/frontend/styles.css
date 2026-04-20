@@ -2063,3 +2063,35 @@ input[type="file"]::-webkit-file-upload-button {
   border-left-color: #c0453e;
   background: rgba(192, 69, 62, 0.08);
 }
+
+/* Ingest Audit tab */
+.audit-card { display: block; }
+.audit-card .doc-card-meta { margin-top: 10px; }
+.audit-status { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.7rem; padding: 4px 10px; }
+.audit-status-success { color: #7cd6a6; border-color: rgba(124, 214, 166, 0.45); }
+.audit-status-failed { color: #ffb8b3; border-color: rgba(255, 184, 179, 0.45); background: rgba(192, 69, 62, 0.15); }
+.audit-status-skipped { color: var(--ink-muted); border-color: var(--border-2); }
+.audit-detail-card { cursor: default; }
+.audit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; margin-top: 14px; }
+.audit-field { display: flex; flex-direction: column; gap: 4px; }
+.audit-field-wide { grid-column: 1 / -1; }
+.audit-field-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-faint); }
+.audit-field-value { color: var(--ink-soft); font-size: 0.82rem; line-height: 1.5; }
+.audit-mono { font-family: var(--font-mono); font-size: 0.74rem; word-break: break-all; }
+.audit-dim { color: var(--ink-faint); margin-left: 6px; }
+.audit-error { color: #ffb8b3; }
+.audit-notes { margin: 8px 0 0; padding: 10px 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-0); border-radius: 10px; font-family: var(--font-mono); font-size: 0.74rem; white-space: pre-wrap; color: var(--ink-soft); }
+.audit-entity-card { cursor: default; }
+.audit-entity-card-low { border-color: rgba(241, 167, 63, 0.45); background: rgba(241, 167, 63, 0.07); }
+.audit-entity-badge { padding: 4px 10px; border: 1px solid var(--border-0); border-radius: 999px; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.audit-entity-ok { color: #7cd6a6; border-color: rgba(124, 214, 166, 0.4); }
+.audit-entity-low { color: var(--amber-100); border-color: rgba(241, 167, 63, 0.5); background: rgba(241, 167, 63, 0.12); }
+.audit-entity-reviewed { color: #5eb0ff; border-color: rgba(94, 176, 255, 0.45); }
+.audit-entity-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.audit-entity-reviewed-label { color: var(--ink-faint); font-family: var(--font-mono); font-size: 0.72rem; }
+.audit-confirm-btn { padding: 6px 14px; font-size: 0.74rem; }
+.audit-entity-action-group { display: flex; align-items: center; gap: 8px; }
+.audit-remove-btn { padding: 6px 12px; font-size: 0.74rem; background: transparent; border: 1px solid rgba(255, 120, 120, 0.35); color: #ff9a9a; }
+.audit-remove-btn:hover { border-color: rgba(255, 120, 120, 0.65); background: rgba(255, 120, 120, 0.1); color: #ffb3b3; }
+.audit-remove-btn:disabled { opacity: 0.6; cursor: progress; }
+

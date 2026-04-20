@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -49,6 +49,10 @@
         <button class="nav-btn" data-target="tab-cases" title="Case Desk">
           <span class="nav-icon">C</span>
           <span>Cases</span>
+        </button>
+        <button class="nav-btn" data-target="tab-audit" title="Ingest Audit">
+          <span class="nav-icon">I</span>
+          <span>Ingest</span>
         </button>
       </nav>
 
@@ -622,6 +626,103 @@
             </div>
           </div>
         </section>
+
+        <section id="tab-audit" class="tab-pane">
+          <div class="workspace">
+            <div class="workspace-head">
+              <div>
+                <div class="workspace-kicker">Section 05</div>
+                <h1 class="section-title">Ingest Audit</h1>
+                <p class="section-desc">
+                  Every document ingested, the metadata captured for it, and the entities the extractor proposed.
+                  Low-confidence candidates are flagged so you can confirm and add them to the graph â€” or leave them aside.
+                </p>
+              </div>
+              <div class="head-metrics">
+                <div class="metric-card">
+                  <div class="metric-label">Records</div>
+                  <div class="metric-value" id="audit-event-count">0</div>
+                </div>
+                <div class="metric-card">
+                  <div class="metric-label">Low conf</div>
+                  <div class="metric-value" id="audit-low-count">0</div>
+                </div>
+                <div class="metric-card">
+                  <div class="metric-label">Threshold</div>
+                  <div class="metric-value" id="audit-threshold">0.50</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="workspace-body cases-layout">
+              <div class="side-panel">
+                <div class="panel-card">
+                  <div class="card-pad">
+                    <div class="panel-titlebar">
+                      <div>
+                        <div class="panel-overline">Filters</div>
+                        <div class="panel-title">Scope ingestion log</div>
+                        <p class="panel-copy">Filter by case or status. Newest events appear first.</p>
+                      </div>
+                      <div class="panel-chip">Audit</div>
+                    </div>
+                    <form id="audit-filter-form">
+                      <div class="field-group">
+                        <label class="field-label" for="audit-case-select">Case</label>
+                        <select id="audit-case-select">
+                          <option value="">All cases</option>
+                        </select>
+                      </div>
+                      <div class="field-group">
+                        <label class="field-label" for="audit-status-select">Status</label>
+                        <select id="audit-status-select">
+                          <option value="">Any</option>
+                          <option value="success">Success</option>
+                          <option value="failed">Failed</option>
+                          <option value="skipped">Skipped</option>
+                        </select>
+                      </div>
+                      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
+                        Reload ingestions
+                      </button>
+                    </form>
+                    <div id="audit-filter-status" class="inline-status inline-status-muted">Loading ingestion history...</div>
+                  </div>
+                </div>
+
+                <div class="panel-card tall">
+                  <div id="audit-list-header" style="padding:14px 18px;border-bottom:1px solid var(--border-0);">
+                    Ingestion log
+                  </div>
+                  <div id="audit-list" class="case-list">
+                    <div class="timeline-empty">Ingestion events will appear here once they load.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="panel-column">
+                <div class="panel-card tall">
+                  <div id="audit-detail-header" style="padding:14px 18px;border-bottom:1px solid var(--border-0);">
+                    Ingestion detail
+                  </div>
+                  <div id="audit-detail" class="case-documents">
+                    <div class="timeline-empty">Select an ingestion on the left to inspect its metadata.</div>
+                  </div>
+                </div>
+
+                <div class="panel-card tall">
+                  <div id="audit-entities-header" style="padding:14px 18px;border-bottom:1px solid var(--border-0);display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                    <span>Extracted entities</span>
+                    <span id="audit-entities-summary" style="font-size:0.75rem;color:var(--ink-faint);"></span>
+                  </div>
+                  <div id="audit-entities" class="case-documents">
+                    <div class="timeline-empty">Entities extracted for the selected ingestion will appear here.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -676,5 +777,6 @@
   <script src="/ui/graph.js?v=20260420-casescope"></script>
   <script src="/ui/graph_insights.js?v=20260420-casescope"></script>
   <script src="/ui/timeline.js?v=20260420-casescope"></script>
+  <script src="/ui/audit.js?v=20260420-audit-remove"></script>
 </body>
 </html>

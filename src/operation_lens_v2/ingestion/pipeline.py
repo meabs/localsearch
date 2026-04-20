@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 
 from operation_lens_v2.config import settings
@@ -19,6 +21,11 @@ from operation_lens_v2.ingestion import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> datetime:
+    # datetime.UTC was added in 3.11 but the aliased constant is clearer.
+    return datetime.now(timezone.utc)
 
 
 def _spans_overlap(start_a: int, end_a: int, start_b: int, end_b: int) -> bool:
@@ -67,9 +74,91 @@ async def ingest_pdf(
         ).fetchone()
         if existing:
             logger.info("Skipping already-ingested doc: %s (use force=True to re-ingest)", pdf_path)
+            duck_store.record_ingestion_event(
+                con,
+                event_id=str(uuid4()),
+                case_id=case_id,
+                doc_id=existing[0],
+                source_path=str(pdf_path),
+                source_type="pdf",
+                status="skipped",
+                started_at=_utc_now(),
+                completed_at=_utc_now(),
+                duration_ms=0,
+            )
             return {"doc_id": existing[0], "case_ref": case_ref, "skipped": 1}
 
+    event_id = str(uuid4())
+    started_at = _utc_now()
+    started_perf = perf_counter()
     doc_id = str(uuid4())
+
+    try:
+        result = await _run_pdf_ingestion(
+            pdf_path=pdf_path,
+            doc_id=doc_id,
+            case_ref=case_ref,
+            case_id=case_id,
+            con=con,
+            vs=vs,
+        )
+    except Exception as exc:
+        duration_ms = int((perf_counter() - started_perf) * 1000)
+        duck_store.record_ingestion_event(
+            con,
+            event_id=event_id,
+            case_id=case_id,
+            doc_id=doc_id,
+            source_path=str(pdf_path),
+            source_type="pdf",
+            status="failed",
+            started_at=started_at,
+            completed_at=_utc_now(),
+            duration_ms=duration_ms,
+            error_message=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+
+    duration_ms = int((perf_counter() - started_perf) * 1000)
+    entities_new = duck_store.count_entities_first_seen_in(con, doc_id)
+    relationships_new = duck_store.count_relationships_evidenced_in(con, doc_id)
+    duck_store.record_ingestion_event(
+        con,
+        event_id=event_id,
+        case_id=case_id,
+        doc_id=doc_id,
+        source_path=str(pdf_path),
+        source_type="pdf",
+        status="success",
+        started_at=started_at,
+        completed_at=_utc_now(),
+        duration_ms=duration_ms,
+        pages=result["pages"],
+        chunks=result["chunks"],
+        entities_new=entities_new,
+        relationships_new=relationships_new,
+        ocr_used=result["ocr_used"],
+    )
+    result["entities_new"] = entities_new
+    result["relationships_new"] = relationships_new
+    result["event_id"] = event_id
+    return result
+
+
+async def _run_pdf_ingestion(
+    *,
+    pdf_path: Path,
+    doc_id: str,
+    case_ref: str,
+    case_id: str,
+    con,
+    vs,
+) -> dict[str, int | str | bool]:
+    """Inner pipeline body — returns the legacy ingestion summary.
+
+    Split out so ``ingest_pdf`` can wrap the call in an ingestion-event
+    recorder without inflating the function with timing/metrics bookkeeping.
+    """
     pages, ocr_used = extractor.extract_pdf_text(pdf_path)
     duck_store.upsert_document(
         con,
@@ -114,6 +203,7 @@ async def ingest_pdf(
                 source_doc=doc_id,
                 source_chunk=chunk.chunk_id,
                 threshold=settings.alias_threshold,
+                confidence=float(getattr(entity, "confidence", 1.0) or 1.0),
             )
 
         logger.debug("chunk=%s entities=%d", chunk.chunk_id[:8], len(merged_entities))
@@ -162,6 +252,7 @@ async def ingest_pdf(
         "pages": len(pages),
         "chunks": len(chunks),
         "relationships": relation_count,
+        "ocr_used": ocr_used,
     }
 
 

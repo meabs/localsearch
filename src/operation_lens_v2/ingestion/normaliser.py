@@ -143,8 +143,17 @@ def resolve_entity(
     source_doc: str,
     source_chunk: str,
     threshold: float | None = None,
+    confidence: float = 1.0,
 ) -> str:
-    """Resolve `surface` to a canonical entity_id, creating one if no match exists."""
+    """Resolve `surface` to a canonical entity_id, creating one if no match exists.
+
+    ``confidence`` is the extractor's self-reported score for this mention
+    (see ``ExtractedEntity.confidence``). When we mint a new entity we seed
+    its stored confidence with this value so the Audit view can flag
+    low-confidence candidates for human review. When we merge into an
+    existing entity, we take the max of the two so a single strong mention
+    lifts a previously-weak entity out of the review queue.
+    """
     canonical = normalise(surface, entity_type)
     match_threshold = threshold if threshold is not None else settings.alias_threshold
     candidates = duck_store.get_entities_by_type(con, entity_type)
@@ -157,8 +166,15 @@ def resolve_entity(
                 source_doc=source_doc,
                 source_chunk=source_chunk,
             )
+            duck_store.bump_entity_confidence(con, entity_id, confidence)
             return entity_id
-    new_id = duck_store.create_entity(con, canonical, entity_type, first_seen_doc=source_doc)
+    new_id = duck_store.create_entity(
+        con,
+        canonical,
+        entity_type,
+        first_seen_doc=source_doc,
+        confidence=confidence,
+    )
     duck_store.register_alias(
         con,
         entity_id=new_id,

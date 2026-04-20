@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     # ── Normalisation ─────────────────────────────────────────────────────────
     alias_threshold: float = Field(default=0.88, alias="ALIAS_THRESHOLD")
 
+    # ── Entity review ─────────────────────────────────────────────────────────
+    # Entities whose stored confidence falls below this threshold are surfaced
+    # as "candidates" in the Audit view so a human can confirm or discard them.
+    low_confidence_threshold: float = Field(
+        default=0.50, alias="LOW_CONFIDENCE_THRESHOLD"
+    )
+
     # ── Relationship extraction ───────────────────────────────────────────────
     pattern_confidence: float = Field(default=0.85, alias="PATTERN_CONFIDENCE")
     llm_confidence_min: float = Field(default=0.10, alias="LLM_CONFIDENCE_MIN")
