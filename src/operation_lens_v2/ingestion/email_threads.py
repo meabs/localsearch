@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 
 from operation_lens_v2.config import settings
@@ -17,6 +19,30 @@ logger = logging.getLogger(__name__)
 _EMAIL_ANGLE_RE = re.compile(r"<([^<>@\s]+@[^<>@\s]+)>")
 _EMAIL_BRACKET_RE = re.compile(r"\[([^][]+@[^][]+)\]")
 _WHITESPACE_RE = re.compile(r"\s+")
+
+
+@dataclass(slots=True)
+class EmailMessage:
+    sender: str
+    recipients: list[str]
+    subject: str
+    timestamp: str
+    body: str
+
+
+@dataclass(slots=True)
+class AttachmentRef:
+    filename: str
+    mime_type: str
+    size: int
+
+
+@dataclass(slots=True)
+class ThreadDocument:
+    thread_id: str
+    subject: str
+    messages: list[EmailMessage]
+    attachments: list[AttachmentRef] = field(default_factory=list)
 
 
 def _format_message_text(
@@ -251,6 +277,10 @@ async def ingest_email_thread_parquet(
     resolved_case_name = case_name or case_ref.replace("_", " ").title()
     case_id = duck_store.create_case(con, case_ref=case_ref, case_name=resolved_case_name)
 
+    event_id = str(uuid4())
+    started_at = datetime.now(timezone.utc)
+    started_perf = perf_counter()
+
     rows = con.execute(
         """
         SELECT thread_id, source_file, subject, messages, message_count
@@ -372,10 +402,36 @@ async def ingest_email_thread_parquet(
         ingested_threads += 1
         chunk_count += len(chunks)
 
+    duration_ms = int((perf_counter() - started_perf) * 1000)
+    status = "success" if ingested_threads else "skipped"
+    duck_store.record_ingestion_event(
+        con,
+        event_id=event_id,
+        case_id=case_id,
+        doc_id=None,
+        source_path=str(parquet_path),
+        source_type="email_threads_parquet",
+        status=status,
+        started_at=started_at,
+        completed_at=datetime.now(timezone.utc),
+        duration_ms=duration_ms,
+        pages=None,
+        chunks=chunk_count,
+        relationships_new=relationship_count,
+        ocr_used=False,
+        notes=json.dumps(
+            {
+                "threads": ingested_threads,
+                "skipped_threads": skipped_threads,
+            }
+        ),
+    )
+
     return {
         "case_ref": case_ref,
         "threads": ingested_threads,
         "chunks": chunk_count,
         "relationships": relationship_count,
         "skipped": skipped_threads,
+        "event_id": event_id,
     }

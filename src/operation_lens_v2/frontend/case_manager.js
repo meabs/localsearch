@@ -6,6 +6,7 @@ const caseUploadForm = document.getElementById("case-upload-form");
 const caseUploadSelect = document.getElementById("case-upload-select");
 const caseUploadFileInput = document.getElementById("case-upload-file");
 const caseUploadStatus = document.getElementById("case-upload-status");
+const caseUploadDropzone = document.getElementById("case-upload-dropzone");
 const caseList = document.getElementById("case-list");
 const caseDocuments = document.getElementById("case-documents");
 const queryCaseInput = document.getElementById("case-input");
@@ -29,7 +30,14 @@ function setInlineStatus(element, tone, message) {
 }
 
 function describeUploadType(fileName) {
-  return String(fileName || "").toLowerCase().endsWith(".parquet") ? "thread parquet" : "PDF";
+  const lower = String(fileName || "").toLowerCase();
+  if (lower.endsWith(".parquet")) return "thread parquet";
+  if (lower.endsWith(".csv")) return "CSV";
+  if (lower.endsWith(".tsv")) return "TSV";
+  if ([".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"].some((ext) => lower.endsWith(ext))) {
+    return "image";
+  }
+  return "PDF";
 }
 
 function setSelectedCase(caseRef, options = {}) {
@@ -234,7 +242,11 @@ if (caseUploadForm) {
       return;
     }
     if (!file) {
-      setInlineStatus(caseUploadStatus, "error", "Select a PDF or thread Parquet file to upload.");
+      setInlineStatus(
+        caseUploadStatus,
+        "error",
+        "Select a PDF, image, CSV, TSV, or thread Parquet file to upload.",
+      );
       return;
     }
 
@@ -268,6 +280,20 @@ if (caseUploadForm) {
         throw new Error(body || `Upload failed (${resp.status})`);
       }
       const data = await resp.json();
+      if (data.doc_id) {
+        const started = Date.now();
+        while (Date.now() - started < 30000) {
+          try {
+            const statusResp = await fetch(`/ingest/status/${encodeURIComponent(data.doc_id)}`);
+            if (statusResp.ok) {
+              const statusPayload = await statusResp.json();
+              const st = statusPayload?.status || "";
+              if (["success", "failed", "ocr_failed", "skipped"].includes(st)) break;
+            }
+          } catch (_) {}
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
       await loadCases(caseRef);
       await loadDocuments(caseRef);
       caseUploadForm.reset();
@@ -275,8 +301,10 @@ if (caseUploadForm) {
       caseUploadSelect.value = caseRef;
       setInlineStatus(
         caseUploadStatus,
-        "success",
-        `${data.filename || file.name} stored and ingested for ${caseRef}.`,
+        data.ocr_failed ? "error" : "success",
+        data.ocr_failed
+          ? "OCR produced <20 chars — the document is probably a scan of a blank form or a non-Latin script. Try Tesseract with --lang in settings."
+          : `${data.filename || file.name} stored and ingested for ${caseRef}.`,
       );
     } catch (error) {
       setInlineStatus(caseUploadStatus, "error", String(error));
@@ -285,6 +313,26 @@ if (caseUploadForm) {
         submitButton.disabled = false;
         submitButton.textContent = "Upload and ingest";
       }
+    }
+  });
+}
+
+if (caseUploadDropzone && caseUploadFileInput) {
+  caseUploadDropzone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    caseUploadDropzone.classList.add("drag-over");
+  });
+  caseUploadDropzone.addEventListener("dragleave", () => {
+    caseUploadDropzone.classList.remove("drag-over");
+  });
+  caseUploadDropzone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    caseUploadDropzone.classList.remove("drag-over");
+    const files = event.dataTransfer?.files;
+    if (files && files.length) {
+      caseUploadFileInput.files = files;
+      const first = files[0];
+      setInlineStatus(caseUploadStatus, "muted", `Selected ${first.name} (${Math.round(first.size / 1024)} KB).`);
     }
   });
 }

@@ -34,7 +34,10 @@ def get_duck_connection(path: str):
     if base is None:
         base = connect(resolved)
         _duck_connections[resolved] = base
-    return base.cursor()
+    cursor_factory = getattr(base, "cursor", None)
+    if callable(cursor_factory):
+        return cursor_factory()
+    return base
 
 
 def reset_duck_connection(path: str) -> None:

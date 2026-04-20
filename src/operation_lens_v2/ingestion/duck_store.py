@@ -25,9 +25,12 @@ CREATE TABLE IF NOT EXISTS documents (
   filename TEXT NOT NULL,
   filepath TEXT NOT NULL,
   classification TEXT DEFAULT 'OFFICIAL',
+  format TEXT DEFAULT 'pdf',
   page_count INTEGER,
   ingested_at TIMESTAMP DEFAULT now(),
-  ocr_used BOOLEAN DEFAULT false
+  ocr_used BOOLEAN DEFAULT false,
+  ocr_failed BOOLEAN DEFAULT false,
+  thumbnail_blob BLOB
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -125,7 +128,10 @@ def init_db(path: str) -> duckdb.DuckDBPyConnection:
     _ensure_geocode_columns(con)
     _ensure_attachments_table(con)
     _ensure_temporal_columns(con)
+    _ensure_ingestion_events_table(con)
+    _ensure_entity_review_columns(con)
     _ensure_graph_indexes(con)
+    _ensure_document_columns(con)
     try:
         con.execute("PRAGMA create_fts_index('chunks', 'chunk_id', 'text');")
     except duckdb.CatalogException:
@@ -172,6 +178,18 @@ def _ensure_temporal_columns(con: duckdb.DuckDBPyConnection) -> None:
             pass
 
 
+def _ensure_document_columns(con: duckdb.DuckDBPyConnection) -> None:
+    for ddl in (
+        "ALTER TABLE documents ADD COLUMN format TEXT DEFAULT 'pdf';",
+        "ALTER TABLE documents ADD COLUMN ocr_failed BOOLEAN DEFAULT false;",
+        "ALTER TABLE documents ADD COLUMN thumbnail_blob BLOB;",
+    ):
+        try:
+            con.execute(ddl)
+        except duckdb.CatalogException:
+            pass
+
+
 def _ensure_graph_indexes(con: duckdb.DuckDBPyConnection) -> None:
     # Traversal hot paths hit source_entity/target_entity on every hop. DuckDB
     # has no separate CREATE INDEX pragma for these in older versions, so wrap
@@ -193,6 +211,49 @@ def _ensure_graph_indexes(con: duckdb.DuckDBPyConnection) -> None:
                 con.execute(base)
             except duckdb.CatalogException:
                 pass
+
+
+def _ensure_ingestion_events_table(con: duckdb.DuckDBPyConnection) -> None:
+    """Persist one row per ingestion run so the Audit view can show history.
+
+    Captures both success and failure paths; ``status`` distinguishes them.
+    ``notes`` is a free-form JSON string so callers can stash source-specific
+    extras (for example the email thread count) without a schema change.
+    """
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ingestion_events (
+          event_id TEXT PRIMARY KEY,
+          case_id TEXT,
+          doc_id TEXT,
+          source_path TEXT,
+          source_type TEXT,
+          status TEXT,
+          error_message TEXT,
+          started_at TIMESTAMP,
+          completed_at TIMESTAMP,
+          duration_ms BIGINT,
+          pages INTEGER,
+          chunks INTEGER,
+          entities_new INTEGER,
+          relationships_new INTEGER,
+          ocr_used BOOLEAN,
+          notes TEXT
+        );
+        """
+    )
+
+
+def _ensure_entity_review_columns(con: duckdb.DuckDBPyConnection) -> None:
+    """Columns that let operators confirm low-confidence entities from the Audit view."""
+    for ddl in (
+        "ALTER TABLE entities ADD COLUMN reviewed_at TIMESTAMP;",
+        "ALTER TABLE entities ADD COLUMN reviewed_by TEXT;",
+    ):
+        try:
+            con.execute(ddl)
+        except duckdb.CatalogException:
+            pass
 
 
 def _ensure_attachments_table(con: duckdb.DuckDBPyConnection) -> None:
@@ -431,13 +492,29 @@ def upsert_document(
     page_count: int,
     ocr_used: bool,
     case_id: str | None = None,
+    doc_format: str = "pdf",
+    ocr_failed: bool = False,
+    thumbnail_blob: bytes | None = None,
 ) -> None:
     con.execute(
         """
-        INSERT OR REPLACE INTO documents (doc_id, case_id, filename, filepath, page_count, ocr_used)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO documents (
+          doc_id, case_id, filename, filepath, format, page_count,
+          ocr_used, ocr_failed, thumbnail_blob
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [doc_id, case_id, filename, filepath, page_count, ocr_used],
+        [
+            doc_id,
+            case_id,
+            filename,
+            filepath,
+            doc_format,
+            page_count,
+            ocr_used,
+            ocr_failed,
+            thumbnail_blob,
+        ],
     )
 
 
@@ -482,6 +559,23 @@ def create_entity(
         [entity_id, canonical_name, entity_type, first_seen_doc, confidence],
     )
     return entity_id
+
+
+def bump_entity_confidence(
+    con: duckdb.DuckDBPyConnection,
+    entity_id: str,
+    confidence: float,
+) -> None:
+    """Raise an entity's stored confidence if this mention is stronger.
+
+    Uses ``max`` rather than overwrite so a single high-confidence re-
+    mention can lift an entity out of the low-confidence review queue,
+    while a later weak mention never drags a confirmed entity back down.
+    """
+    con.execute(
+        "UPDATE entities SET confidence = greatest(confidence, ?) WHERE entity_id = ?",
+        [float(confidence), entity_id],
+    )
 
 
 def register_alias(
@@ -558,3 +652,361 @@ def insert_relationship_evidence(
             event_time,
         ],
     )
+
+
+def record_ingestion_event(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    event_id: str,
+    case_id: str | None,
+    doc_id: str | None,
+    source_path: str,
+    source_type: str,
+    status: str,
+    started_at,
+    completed_at,
+    duration_ms: int,
+    pages: int | None = None,
+    chunks: int | None = None,
+    entities_new: int | None = None,
+    relationships_new: int | None = None,
+    ocr_used: bool | None = None,
+    error_message: str | None = None,
+    notes: str | None = None,
+) -> None:
+    con.execute(
+        """
+        INSERT INTO ingestion_events (
+          event_id, case_id, doc_id, source_path, source_type, status,
+          error_message, started_at, completed_at, duration_ms,
+          pages, chunks, entities_new, relationships_new, ocr_used, notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            event_id,
+            case_id,
+            doc_id,
+            source_path,
+            source_type,
+            status,
+            error_message,
+            started_at,
+            completed_at,
+            duration_ms,
+            pages,
+            chunks,
+            entities_new,
+            relationships_new,
+            ocr_used,
+            notes,
+        ],
+    )
+
+
+_INGESTION_EVENT_COLUMNS = (
+    "e.event_id, e.case_id, c.case_ref, c.case_name, e.doc_id, d.filename, "
+    "e.source_path, e.source_type, e.status, e.error_message, "
+    "e.started_at, e.completed_at, e.duration_ms, e.pages, e.chunks, "
+    "e.entities_new, e.relationships_new, e.ocr_used, e.notes"
+)
+
+
+def _row_to_ingestion_event(row) -> dict[str, object]:
+    return {
+        "event_id": row[0],
+        "case_id": row[1],
+        "case_ref": row[2],
+        "case_name": row[3],
+        "doc_id": row[4],
+        "filename": row[5],
+        "source_path": row[6],
+        "source_type": row[7],
+        "status": row[8],
+        "error_message": row[9],
+        "started_at": str(row[10]) if row[10] is not None else None,
+        "completed_at": str(row[11]) if row[11] is not None else None,
+        "duration_ms": int(row[12]) if row[12] is not None else None,
+        "pages": int(row[13]) if row[13] is not None else None,
+        "chunks": int(row[14]) if row[14] is not None else None,
+        "entities_new": int(row[15]) if row[15] is not None else None,
+        "relationships_new": int(row[16]) if row[16] is not None else None,
+        "ocr_used": bool(row[17]) if row[17] is not None else None,
+        "notes": row[18],
+    }
+
+
+def list_ingestion_events(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    case_ref: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    clauses: list[str] = []
+    params: list[object] = []
+    if case_ref:
+        clauses.append("lower(c.case_ref) = lower(?)")
+        params.append(case_ref)
+    if status:
+        clauses.append("e.status = ?")
+        params.append(status)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(max(1, limit))
+    rows = con.execute(
+        f"""
+        SELECT {_INGESTION_EVENT_COLUMNS}
+        FROM ingestion_events e
+        LEFT JOIN cases c ON c.case_id = e.case_id
+        LEFT JOIN documents d ON d.doc_id = e.doc_id
+        {where_sql}
+        ORDER BY e.started_at DESC NULLS LAST
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+    return [_row_to_ingestion_event(row) for row in rows]
+
+
+def get_ingestion_event(
+    con: duckdb.DuckDBPyConnection,
+    event_id: str,
+) -> dict[str, object] | None:
+    row = con.execute(
+        f"""
+        SELECT {_INGESTION_EVENT_COLUMNS}
+        FROM ingestion_events e
+        LEFT JOIN cases c ON c.case_id = e.case_id
+        LEFT JOIN documents d ON d.doc_id = e.doc_id
+        WHERE e.event_id = ?
+        """,
+        [event_id],
+    ).fetchone()
+    return _row_to_ingestion_event(row) if row else None
+
+
+def get_latest_ingestion_for_doc(
+    con: duckdb.DuckDBPyConnection,
+    doc_id: str,
+) -> dict[str, object] | None:
+    row = con.execute(
+        f"""
+        SELECT {_INGESTION_EVENT_COLUMNS}
+        FROM ingestion_events e
+        LEFT JOIN cases c ON c.case_id = e.case_id
+        LEFT JOIN documents d ON d.doc_id = e.doc_id
+        WHERE e.doc_id = ?
+        ORDER BY e.started_at DESC NULLS LAST
+        LIMIT 1
+        """,
+        [doc_id],
+    ).fetchone()
+    return _row_to_ingestion_event(row) if row else None
+
+
+def count_entities_first_seen_in(
+    con: duckdb.DuckDBPyConnection,
+    doc_id: str,
+) -> int:
+    """How many canonical entities were created while ingesting ``doc_id``.
+
+    Other documents can reuse these entities later via alias resolution, so
+    this is the correct "new entities" figure for an ingestion event — it
+    excludes matches against entities established by earlier ingestions.
+    """
+    row = con.execute(
+        "SELECT count(*) FROM entities WHERE first_seen_doc = ?",
+        [doc_id],
+    ).fetchone()
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+def count_relationships_evidenced_in(
+    con: duckdb.DuckDBPyConnection,
+    doc_id: str,
+) -> int:
+    """How many distinct relationships this document contributes evidence to."""
+    row = con.execute(
+        """
+        SELECT count(DISTINCT rel_id)
+        FROM relationship_evidence
+        WHERE doc_id = ?
+        """,
+        [doc_id],
+    ).fetchone()
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+def list_entities_for_doc(
+    con: duckdb.DuckDBPyConnection,
+    doc_id: str,
+    *,
+    low_confidence_threshold: float,
+) -> list[dict[str, object]]:
+    """Return every entity attested by aliases in ``doc_id``.
+
+    ``mentions_in_doc`` counts how many aliases in this document resolved to
+    the entity, which is a better "how strongly does this ingestion back it?"
+    signal than the global ``mention_count`` (which accumulates across the
+    whole corpus).
+    """
+    rows = con.execute(
+        """
+        SELECT
+          e.entity_id,
+          e.canonical_name,
+          e.entity_type,
+          e.confidence,
+          e.mention_count,
+          e.reviewed_at,
+          e.reviewed_by,
+          count(ea.alias_id) AS mentions_in_doc
+        FROM entity_aliases ea
+        JOIN entities e ON e.entity_id = ea.entity_id
+        WHERE ea.source_doc = ?
+        GROUP BY e.entity_id, e.canonical_name, e.entity_type, e.confidence,
+                 e.mention_count, e.reviewed_at, e.reviewed_by
+        ORDER BY e.confidence ASC, mentions_in_doc DESC, e.canonical_name
+        """,
+        [doc_id],
+    ).fetchall()
+    return [
+        {
+            "entity_id": row[0],
+            "canonical_name": row[1],
+            "entity_type": row[2],
+            "confidence": float(row[3]) if row[3] is not None else 0.0,
+            "mention_count": int(row[4] or 0),
+            "reviewed_at": str(row[5]) if row[5] is not None else None,
+            "reviewed_by": row[6],
+            "mentions_in_doc": int(row[7] or 0),
+            "low_confidence": (
+                row[5] is None
+                and row[3] is not None
+                and float(row[3]) < low_confidence_threshold
+            ),
+        }
+        for row in rows
+    ]
+
+
+def confirm_entity(
+    con: duckdb.DuckDBPyConnection,
+    entity_id: str,
+    *,
+    reviewed_by: str | None = None,
+) -> dict[str, object] | None:
+    """Mark an entity as human-confirmed and lift its confidence to 1.0.
+
+    Returns the updated entity row (suitable for the API response) or
+    ``None`` if no entity matched the id.
+    """
+    existing = con.execute(
+        "SELECT entity_id FROM entities WHERE entity_id = ?",
+        [entity_id],
+    ).fetchone()
+    if existing is None:
+        return None
+    con.execute(
+        """
+        UPDATE entities
+        SET confidence = 1.0, reviewed_at = now(), reviewed_by = ?
+        WHERE entity_id = ?
+        """,
+        [reviewed_by, entity_id],
+    )
+    row = con.execute(
+        """
+        SELECT entity_id, canonical_name, entity_type, confidence,
+               mention_count, reviewed_at, reviewed_by
+        FROM entities
+        WHERE entity_id = ?
+        """,
+        [entity_id],
+    ).fetchone()
+    return {
+        "entity_id": row[0],
+        "canonical_name": row[1],
+        "entity_type": row[2],
+        "confidence": float(row[3]) if row[3] is not None else 0.0,
+        "mention_count": int(row[4] or 0),
+        "reviewed_at": str(row[5]) if row[5] is not None else None,
+        "reviewed_by": row[6],
+    }
+
+
+def count_entities(con: duckdb.DuckDBPyConnection) -> int:
+    row = con.execute("SELECT count(*) FROM entities").fetchone()
+    return int(row[0] or 0)
+
+
+def count_relationships(con: duckdb.DuckDBPyConnection) -> int:
+    row = con.execute("SELECT count(*) FROM relationships").fetchone()
+    return int(row[0] or 0)
+
+
+def delete_entity_cascade(
+    con: duckdb.DuckDBPyConnection,
+    entity_id: str,
+) -> dict[str, int] | None:
+    """Remove an entity and every edge/evidence/alias that referenced it.
+
+    Intended for pruning clearly-bad extractions from the Audit view. We
+    resolve the dependent rows first so DuckDB never sees a dangling FK
+    reference and so the caller can show a summary of what was removed.
+    Returns ``None`` when the entity id does not exist.
+    """
+    existing = con.execute(
+        "SELECT entity_id FROM entities WHERE entity_id = ?",
+        [entity_id],
+    ).fetchone()
+    if existing is None:
+        return None
+
+    rel_rows = con.execute(
+        """
+        SELECT rel_id FROM relationships
+        WHERE source_entity = ? OR target_entity = ?
+        """,
+        [entity_id, entity_id],
+    ).fetchall()
+    rel_ids = [row[0] for row in rel_rows]
+
+    evidence_removed = 0
+    if rel_ids:
+        placeholders = ",".join(["?"] * len(rel_ids))
+        evidence_row = con.execute(
+            f"SELECT count(*) FROM relationship_evidence WHERE rel_id IN ({placeholders})",
+            rel_ids,
+        ).fetchone()
+        evidence_removed = int(evidence_row[0] or 0)
+        con.execute(
+            f"DELETE FROM relationship_evidence WHERE rel_id IN ({placeholders})",
+            rel_ids,
+        )
+        con.execute(
+            f"DELETE FROM relationships WHERE rel_id IN ({placeholders})",
+            rel_ids,
+        )
+
+    aliases_row = con.execute(
+        "SELECT count(*) FROM entity_aliases WHERE entity_id = ?",
+        [entity_id],
+    ).fetchone()
+    aliases_removed = int(aliases_row[0] or 0)
+    con.execute("DELETE FROM entity_aliases WHERE entity_id = ?", [entity_id])
+
+    attachments_row = con.execute(
+        "SELECT count(*) FROM entity_attachments WHERE entity_id = ?",
+        [entity_id],
+    ).fetchone()
+    attachments_removed = int(attachments_row[0] or 0)
+    con.execute("DELETE FROM entity_attachments WHERE entity_id = ?", [entity_id])
+
+    con.execute("DELETE FROM entities WHERE entity_id = ?", [entity_id])
+    return {
+        "relationships_removed": len(rel_ids),
+        "evidence_removed": evidence_removed,
+        "aliases_removed": aliases_removed,
+        "attachments_removed": attachments_removed,
+    }

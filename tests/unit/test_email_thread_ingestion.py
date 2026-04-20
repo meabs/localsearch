@@ -10,7 +10,7 @@ from operation_lens_v2.ingestion.email_threads import ingest_email_thread_parque
 
 
 def _write_sample_parquet(path: Path) -> None:
-    import duckdb
+    import pandas as pd
 
     messages = json.dumps(
         [
@@ -30,21 +30,18 @@ def _write_sample_parquet(path: Path) -> None:
             },
         ]
     )
-    con = duckdb.connect()
-    con.execute(
-        """
-        COPY (
-          SELECT
-            'thread-1' AS thread_id,
-            'sample.txt' AS source_file,
-            'Re:' AS subject,
-            ? AS messages,
-            2 AS message_count
-        ) TO ? (FORMAT PARQUET)
-        """,
-        [messages, str(path)],
+    frame = pd.DataFrame(
+        [
+            {
+                "thread_id": "thread-1",
+                "source_file": "sample.txt",
+                "subject": "Re:",
+                "messages": messages,
+                "message_count": 2,
+            }
+        ]
     )
-    con.close()
+    frame.to_parquet(path, index=False)
 
 
 @pytest.mark.asyncio
