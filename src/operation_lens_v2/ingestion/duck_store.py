@@ -158,8 +158,11 @@ def _ensure_geocode_columns(con: duckdb.DuckDBPyConnection) -> None:
     ):
         try:
             con.execute(ddl)
-        except duckdb.CatalogException:
-            pass
+        except (duckdb.CatalogException, duckdb.TransactionException):
+            try:
+                con.execute("ROLLBACK;")
+            except duckdb.Error:
+                pass
 
 
 def _ensure_temporal_columns(con: duckdb.DuckDBPyConnection) -> None:
@@ -174,8 +177,11 @@ def _ensure_temporal_columns(con: duckdb.DuckDBPyConnection) -> None:
     ):
         try:
             con.execute(ddl)
-        except duckdb.CatalogException:
-            pass
+        except (duckdb.CatalogException, duckdb.TransactionException):
+            try:
+                con.execute("ROLLBACK;")
+            except duckdb.Error:
+                pass
 
 
 def _ensure_document_columns(con: duckdb.DuckDBPyConnection) -> None:
@@ -186,8 +192,11 @@ def _ensure_document_columns(con: duckdb.DuckDBPyConnection) -> None:
     ):
         try:
             con.execute(ddl)
-        except duckdb.CatalogException:
-            pass
+        except (duckdb.CatalogException, duckdb.TransactionException):
+            try:
+                con.execute("ROLLBACK;")
+            except duckdb.Error:
+                pass
 
 
 def _ensure_graph_indexes(con: duckdb.DuckDBPyConnection) -> None:
@@ -202,8 +211,11 @@ def _ensure_graph_indexes(con: duckdb.DuckDBPyConnection) -> None:
     ):
         try:
             con.execute(ddl)
-        except duckdb.CatalogException:
-            pass
+        except (duckdb.CatalogException, duckdb.TransactionException):
+            try:
+                con.execute("ROLLBACK;")
+            except duckdb.Error:
+                pass
         except duckdb.ParserException:
             # Older DuckDB builds reject `IF NOT EXISTS` on indexes.
             base = ddl.replace("IF NOT EXISTS ", "")
@@ -252,8 +264,11 @@ def _ensure_entity_review_columns(con: duckdb.DuckDBPyConnection) -> None:
     ):
         try:
             con.execute(ddl)
-        except duckdb.CatalogException:
-            pass
+        except (duckdb.CatalogException, duckdb.TransactionException):
+            try:
+                con.execute("ROLLBACK;")
+            except duckdb.Error:
+                pass
 
 
 def _ensure_attachments_table(con: duckdb.DuckDBPyConnection) -> None:

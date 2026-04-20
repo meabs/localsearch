@@ -9,6 +9,63 @@ import pdfplumber
 logger = logging.getLogger(__name__)
 
 _OCR_MIN_CHARS = 50
+_GPS_IFD_TAG = 0x8825
+
+
+def read_image_gps(image_path: Path) -> tuple[float, float] | None:
+    """Extract decimal-degree latitude/longitude from EXIF GPS tags.
+
+    Returns None when the file has no GPS IFD or the required sub-tags are
+    absent. Never raises — corrupt EXIF logs at DEBUG and yields None so the
+    ingestion pipeline can continue on OCR alone.
+    """
+    try:
+        from PIL import Image
+        from PIL.ExifTags import GPSTAGS
+    except ImportError:
+        logger.warning("Pillow not available — skipping EXIF GPS read for %s", image_path)
+        return None
+
+    try:
+        with Image.open(image_path) as img:
+            exif = img.getexif()
+            gps_ifd = exif.get_ifd(_GPS_IFD_TAG)
+    except Exception as exc:
+        logger.debug("EXIF read failed for %s: %s", image_path, exc)
+        return None
+
+    if not gps_ifd:
+        return None
+
+    gps = {GPSTAGS.get(tag, tag): value for tag, value in gps_ifd.items()}
+    lat_dms = gps.get("GPSLatitude")
+    lat_ref = gps.get("GPSLatitudeRef")
+    lon_dms = gps.get("GPSLongitude")
+    lon_ref = gps.get("GPSLongitudeRef")
+    if not (lat_dms and lat_ref and lon_dms and lon_ref):
+        return None
+
+    try:
+        lat = float(lat_dms[0]) + float(lat_dms[1]) / 60 + float(lat_dms[2]) / 3600
+        lon = float(lon_dms[0]) + float(lon_dms[1]) / 60 + float(lon_dms[2]) / 3600
+    except (TypeError, ValueError, IndexError, ZeroDivisionError) as exc:
+        logger.debug("EXIF GPS parse failed for %s: %s", image_path, exc)
+        return None
+
+    if isinstance(lat_ref, bytes):
+        lat_ref = lat_ref.decode("ascii", errors="ignore")
+    if isinstance(lon_ref, bytes):
+        lon_ref = lon_ref.decode("ascii", errors="ignore")
+    if lat_ref.upper().startswith("S"):
+        lat = -lat
+    if lon_ref.upper().startswith("W"):
+        lon = -lon
+
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        logger.debug("EXIF GPS out of range for %s: lat=%s lon=%s", image_path, lat, lon)
+        return None
+
+    return lat, lon
 
 
 def _clean_text(text: str) -> str:

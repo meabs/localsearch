@@ -60,8 +60,12 @@ async def ingest_image(
         thumbnail_blob = thumb_bytes_io.getvalue()
         ocr_text = extractor.ocr_image(image_copy, doc_id=doc_id, page_no=1, lang=config.ocr_lang)
 
+    gps = extractor.read_image_gps(image_path)
     ocr_failed = len(ocr_text.strip()) < config.min_chars
     page_text = ocr_text if ocr_text.strip() else image_path.name
+    if gps is not None:
+        lat, lon = gps
+        page_text = f"{page_text}\n\n[EXIF GPS: {lat:.6f}, {lon:.6f}]".strip()
     chunk_token_count = chunker.count_tokens(page_text)
     chunk = Chunk(
         chunk_id=str(uuid4()),
@@ -104,6 +108,28 @@ async def ingest_image(
             threshold=settings.alias_threshold,
             confidence=float(getattr(entity, "confidence", 1.0) or 1.0),
         )
+
+    if gps is not None:
+        lat, lon = gps
+        gps_surface = f"{lat:.6f}, {lon:.6f}"
+        gps_entity_id = normaliser.resolve_entity(
+            surface=gps_surface,
+            entity_type="LOCATION",
+            con=con,
+            source_doc=doc_id,
+            source_chunk=chunk.chunk_id,
+            threshold=settings.alias_threshold,
+            confidence=1.0,
+        )
+        duck_store.set_entity_geocode(
+            con,
+            entity_id=gps_entity_id,
+            latitude=lat,
+            longitude=lon,
+            provider="exif",
+            display_name=f"EXIF GPS tag from {image_path.name}",
+        )
+        canonical_id_by_surface[gps_surface] = gps_entity_id
 
     relationships = await relationship_extractor.extract_relationships(chunk.text, merged_entities)
     rel_count = 0
