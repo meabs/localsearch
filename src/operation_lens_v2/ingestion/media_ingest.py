@@ -143,11 +143,18 @@ async def ingest_media(
             doc_id=doc_id,
             case_id=case_id,
         )
+        object_chunks, object_vector_rows = await _media_object_vector_rows(
+            doc_id=doc_id,
+            media_graph=media_graph,
+        )
+        if object_chunks:
+            duck_store.insert_chunks(con, object_chunks)
+            lance.upsert(object_vector_rows)
         result = {
             "doc_id": doc_id,
             "case_ref": case_ref,
             "pages": 0,
-            "chunks": 0,
+            "chunks": len(object_chunks),
             "relationships": 0,
             "format": "media",
             "transcribed": False,
@@ -169,7 +176,7 @@ async def ingest_media(
             completed_at=_utc_now(),
             duration_ms=duration_ms,
             pages=0,
-            chunks=0,
+            chunks=len(object_chunks),
             relationships_new=0,
             ocr_used=False,
             notes="; ".join(
@@ -210,6 +217,12 @@ async def ingest_media(
         overlap_ratio=settings.chunk_overlap_tokens / settings.chunk_target_tokens,
     )
     duck_store.insert_chunks(con, chunks)
+    object_chunks, object_vector_rows = await _media_object_vector_rows(
+        doc_id=doc_id,
+        media_graph=media_graph,
+    )
+    if object_chunks:
+        duck_store.insert_chunks(con, object_chunks)
 
     vector_rows = []
     relationship_count = 0
@@ -225,13 +238,14 @@ async def ingest_media(
             }
         )
 
-    if vector_rows:
-        lance.upsert(vector_rows)
+    all_vector_rows = [*vector_rows, *object_vector_rows]
+    if all_vector_rows:
+        lance.upsert(all_vector_rows)
     result = {
         "doc_id": doc_id,
         "case_ref": case_ref,
         "pages": 1,
-        "chunks": len(chunks),
+        "chunks": len(chunks) + len(object_chunks),
         "relationships": relationship_count,
         "format": "media",
         "transcribed": True,
@@ -252,7 +266,7 @@ async def ingest_media(
         completed_at=_utc_now(),
         duration_ms=duration_ms,
         pages=1,
-        chunks=len(chunks),
+        chunks=len(chunks) + len(object_chunks),
         entities_new=duck_store.count_entities_first_seen_in(con, doc_id),
         relationships_new=relationship_count,
         ocr_used=False,
@@ -267,6 +281,44 @@ async def ingest_media(
         ),
     )
     return result
+
+
+async def _media_object_vector_rows(
+    *,
+    doc_id: str,
+    media_graph: dict[str, object],
+) -> tuple[list[Chunk], list[dict[str, object]]]:
+    evidence_items = media_graph.get("evidence_texts")
+    if not isinstance(evidence_items, list):
+        return [], []
+    chunks: list[Chunk] = []
+    vector_rows: list[dict[str, object]] = []
+    for index, item in enumerate(evidence_items):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        page = int(item.get("frame_index") or 0) + 1
+        chunk = Chunk(
+            chunk_id=f"media-object:{item.get('detection_id') or uuid4()}",
+            doc_id=doc_id,
+            page=page,
+            chunk_index=10_000 + index,
+            text=text,
+            token_count=chunker.count_tokens(text),
+        )
+        chunks.append(chunk)
+        vector_rows.append(
+            {
+                "chunk_id": chunk.chunk_id,
+                "doc_id": chunk.doc_id,
+                "page": chunk.page,
+                "text": chunk.text,
+                "vector": await embedder.embed_text(chunk.text),
+            }
+        )
+    return chunks, vector_rows
 
 
 def _extract_media_objects_safe(

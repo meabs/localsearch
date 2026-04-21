@@ -278,6 +278,7 @@ def extract_media_objects(
     frame_count = 0
     detection_count = 0
     relation_count = 0
+    evidence_texts: list[dict[str, object]] = []
     detector_notes: set[str] = set()
     for frame_index, (frame_path, timestamp_seconds) in enumerate(frame_specs):
         frame_id = duck_store.insert_media_frame(
@@ -315,6 +316,25 @@ def extract_media_objects(
                 y2=float(bbox[3]),
             )
             detection_ids.append((detection_id, item))
+            evidence_texts.append(
+                {
+                    "detection_id": detection_id,
+                    "frame_id": frame_id,
+                    "frame_index": frame_index,
+                    "timestamp_seconds": timestamp_seconds,
+                    "label": str(item["label"]),
+                    "confidence": float(item["confidence"]),
+                    "bbox": [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])],
+                    "frame_path": str(frame_path),
+                    "text": (
+                        f"Media object detection in {media_path.name}: "
+                        f"{item['label']} at frame {frame_index + 1} "
+                        f"({timestamp_seconds:.1f}s), confidence {float(item['confidence']):.2f}, "
+                        f"bounding box [{float(bbox[0]):.1f}, {float(bbox[1]):.1f}, "
+                        f"{float(bbox[2]):.1f}, {float(bbox[3]):.1f}]."
+                    ),
+                }
+            )
             detection_count += 1
 
         for (left_id, left), (right_id, right) in itertools.combinations(detection_ids, 2):
@@ -349,5 +369,6 @@ def extract_media_objects(
         "frames": frame_count,
         "detections": detection_count,
         "object_relationships": relation_count,
+        "evidence_texts": evidence_texts,
         "notes": "; ".join(notes),
     }

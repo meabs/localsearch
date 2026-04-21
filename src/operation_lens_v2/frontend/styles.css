@@ -1036,6 +1036,7 @@ input[type="file"]::-webkit-file-upload-button {
 
 #cy.media-review-root {
   min-height: 560px;
+  height: min(64vh, 640px);
   padding: 18px;
   overflow: auto;
 }
@@ -1117,12 +1118,19 @@ input[type="file"]::-webkit-file-upload-button {
 }
 
 .media-frame-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  display: flex;
+  align-items: flex-start;
   gap: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 8px;
+  scroll-snap-type: x proximity;
 }
 
 .media-frame-card {
+  flex: 0 0 280px;
+  width: 280px;
+  max-width: 280px;
   display: grid;
   gap: 10px;
   padding: 10px;
@@ -1130,6 +1138,7 @@ input[type="file"]::-webkit-file-upload-button {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.028);
   cursor: pointer;
+  scroll-snap-align: start;
 }
 
 .media-frame-card:hover {
@@ -1139,6 +1148,7 @@ input[type="file"]::-webkit-file-upload-button {
 .media-frame-image-wrap {
   position: relative;
   overflow: hidden;
+  width: 100%;
   border: 1px solid rgba(133, 170, 206, 0.2);
   border-radius: 8px;
   background: #020407;
@@ -1146,6 +1156,7 @@ input[type="file"]::-webkit-file-upload-button {
 
 .media-frame-image-wrap.compact {
   margin: 12px 0;
+  max-height: 240px;
 }
 
 .media-frame-img {
@@ -1153,6 +1164,30 @@ input[type="file"]::-webkit-file-upload-button {
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: contain;
+}
+
+.media-frame-image-wrap.compact .media-frame-img {
+  max-height: 240px;
+}
+
+.media-frame-image-wrap.frame-error {
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+}
+
+.media-frame-image-wrap.frame-error::before {
+  content: "Frame image missing";
+  color: var(--red-100);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.media-frame-image-wrap.frame-error img,
+.media-frame-image-wrap.frame-error .media-bbox {
+  display: none;
 }
 
 .media-bbox {
@@ -1177,6 +1212,17 @@ input[type="file"]::-webkit-file-upload-button {
   font-size: 0.68rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.media-frame-card-meta span,
+.media-frame-card-meta strong {
+  min-width: 0;
+}
+
+.media-frame-card-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .media-frame-card-meta strong {

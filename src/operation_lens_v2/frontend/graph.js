@@ -402,6 +402,9 @@
     (root || document).querySelectorAll(".media-frame-image-wrap").forEach((wrap) => {
       const img = wrap.querySelector(".media-frame-img");
       if (!img) return;
+      img.addEventListener("error", () => {
+        wrap.classList.add("frame-error");
+      });
       const update = () => {
         const width = img.naturalWidth || 1;
         const height = img.naturalHeight || 1;
@@ -551,7 +554,7 @@
     const bbox = Array.isArray(node.bbox) ? node.bbox.map((v) => Number(v).toFixed(1)).join(", ") : "";
     detail.innerHTML = `
       <div class="node-detail-header">${escHtml(node.label)}</div>
-      ${mediaPreviewHtml(node)}
+      ${mediaPreviewHtml(node, { compact: true })}
       <div class="detail-field"><span class="detail-key">TYPE</span><span class="detail-val">${escHtml(node.entity_type || "UNKNOWN")}</span></div>
       ${node.media_type ? `<div class="detail-field"><span class="detail-key">MEDIA</span><span class="detail-val">${escHtml(node.media_type)}</span></div>` : ""}
       ${node.object_label ? `<div class="detail-field"><span class="detail-key">OBJECT</span><span class="detail-val">${escHtml(node.object_label)}</span></div>` : ""}

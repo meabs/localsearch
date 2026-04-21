@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from operation_lens_v2.api.routes.graph import media_network
 from operation_lens_v2.config import settings
-from operation_lens_v2.ingestion import duck_store, media_objects
+from operation_lens_v2.ingestion import duck_store, media_ingest, media_objects
 
 
 def test_media_object_graph_returns_assets_frames_and_objects(tmp_path, monkeypatch) -> None:
@@ -97,3 +99,29 @@ def test_find_ffmpeg_prefers_configured_executable(tmp_path, monkeypatch) -> Non
     monkeypatch.setattr(settings, "ffmpeg_path", str(ffmpeg))
 
     assert media_objects.find_ffmpeg_executable() == ffmpeg
+
+
+async def _embed_stub(_text: str) -> list[float]:
+    return [0.1] * 768
+
+
+@pytest.mark.asyncio
+async def test_media_object_vector_rows_index_detection_text(monkeypatch) -> None:
+    monkeypatch.setattr(media_ingest.embedder, "embed_text", _embed_stub)
+
+    chunks, rows = await media_ingest._media_object_vector_rows(
+        doc_id="doc-1",
+        media_graph={
+            "evidence_texts": [
+                {
+                    "detection_id": "det-1",
+                    "frame_index": 2,
+                    "text": "Media object detection in clip.mp4: person at frame 3.",
+                }
+            ]
+        },
+    )
+
+    assert chunks[0].chunk_id == "media-object:det-1"
+    assert chunks[0].page == 3
+    assert rows[0]["text"].startswith("Media object detection")
