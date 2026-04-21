@@ -23,6 +23,42 @@ def test_plate_strategy_strips_punctuation() -> None:
     assert normalise("RX71-KLD", "VEHICLE") == "RX71 KLD"
 
 
+def test_plate_current_format_2001_onward() -> None:
+    # AA00 AAA — 2 letters, 2 digits, 3 letters.
+    assert normalise("bd51 smr", "VEHICLE") == "BD51 SMR"
+    assert normalise("BD51SMR", "VEHICLE") == "BD51 SMR"
+
+
+def test_plate_prefix_format_1983_2001() -> None:
+    # A000 AAA — 1 letter, up-to-3 digits, 3 letters.
+    assert normalise("a123bcd", "VEHICLE") == "A123 BCD"
+    assert normalise("N1 ABC", "VEHICLE") == "N1 ABC"
+
+
+def test_plate_suffix_format_1963_1983() -> None:
+    # AAA 000A — 3 letters, up-to-3 digits, 1 letter.
+    assert normalise("abc123d", "VEHICLE") == "ABC 123D"
+    assert normalise("XYZ 9A", "VEHICLE") == "XYZ 9A"
+
+
+def test_plate_dateless_format_letters_then_digits() -> None:
+    # AAA 000 — dateless, letters then digits.
+    assert normalise("abc123", "VEHICLE") == "ABC 123"
+    assert normalise("A 1", "VEHICLE") == "A 1"
+
+
+def test_plate_dateless_format_digits_then_letters() -> None:
+    # 000 AAA — dateless, digits then letters.
+    assert normalise("123abc", "VEHICLE") == "123 ABC"
+    assert normalise("9 A", "VEHICLE") == "9 A"
+
+
+def test_plate_unknown_shape_returned_compacted() -> None:
+    # Something that matches no DVLA format should come back uppercased
+    # and compacted — never broken into a misleading "format".
+    assert normalise("xx-1234-yy-99", "VEHICLE") == "XX1234YY99"
+
+
 def test_phone_e164_uk_mobile() -> None:
     assert normalise("07712 345 678", "PHONE") == "+447712345678"
 

@@ -11,6 +11,41 @@ from operation_lens_v2.models import Chunk, RelationshipCandidate
 logger = logging.getLogger(__name__)
 
 
+def _try_ddl(con: duckdb.DuckDBPyConnection, ddl: str, *, context: str) -> None:
+    """Execute idempotent DDL — ``ALTER TABLE ADD COLUMN`` / ``CREATE INDEX``.
+
+    DuckDB has no ``IF NOT EXISTS`` for ``ADD COLUMN`` and older builds reject
+    it on ``CREATE INDEX``. We rely on the error to detect "already applied"
+    rather than querying the schema first. Callers should only pass DDL whose
+    failure is expected and safe; the error is logged at DEBUG with enough
+    context to diagnose a genuine problem without flooding startup logs.
+    """
+    try:
+        con.execute(ddl)
+    except (duckdb.CatalogException, duckdb.TransactionException) as exc:
+        logger.debug("DDL skipped (%s): %s — %s", context, ddl.strip(), exc)
+        try:
+            con.execute("ROLLBACK;")
+        except duckdb.Error as rb_exc:
+            logger.debug("ROLLBACK after %s DDL also failed: %s", context, rb_exc)
+    except duckdb.ParserException as exc:
+        # Older DuckDB builds reject `IF NOT EXISTS` on indexes — retry once.
+        if "IF NOT EXISTS" in ddl:
+            fallback = ddl.replace("IF NOT EXISTS ", "")
+            logger.debug(
+                "DDL parser rejected IF NOT EXISTS (%s); retrying without: %s — %s",
+                context,
+                fallback.strip(),
+                exc,
+            )
+            try:
+                con.execute(fallback)
+            except duckdb.CatalogException as retry_exc:
+                logger.debug("DDL fallback still rejected (%s): %s", context, retry_exc)
+        else:
+            logger.warning("DDL parse error (%s): %s — %s", context, ddl.strip(), exc)
+
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS cases (
   case_id TEXT PRIMARY KEY,
@@ -132,20 +167,21 @@ def init_db(path: str) -> duckdb.DuckDBPyConnection:
     _ensure_entity_review_columns(con)
     _ensure_graph_indexes(con)
     _ensure_document_columns(con)
-    try:
-        con.execute("PRAGMA create_fts_index('chunks', 'chunk_id', 'text');")
-    except duckdb.CatalogException:
-        # Keep init idempotent across repeated ingest calls.
-        pass
+    _try_ddl(
+        con,
+        "PRAGMA create_fts_index('chunks', 'chunk_id', 'text');",
+        context="fts_index",
+    )
     logger.info("DuckDB initialized at %s", path)
     return con
 
 
 def _ensure_case_columns(con: duckdb.DuckDBPyConnection) -> None:
-    try:
-        con.execute("ALTER TABLE documents ADD COLUMN case_id TEXT;")
-    except duckdb.CatalogException:
-        pass
+    _try_ddl(
+        con,
+        "ALTER TABLE documents ADD COLUMN case_id TEXT;",
+        context="documents.case_id",
+    )
 
 
 def _ensure_geocode_columns(con: duckdb.DuckDBPyConnection) -> None:
@@ -156,13 +192,7 @@ def _ensure_geocode_columns(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE entities ADD COLUMN geocode_display_name TEXT;",
         "ALTER TABLE entities ADD COLUMN geocoded_at TIMESTAMP;",
     ):
-        try:
-            con.execute(ddl)
-        except (duckdb.CatalogException, duckdb.TransactionException):
-            try:
-                con.execute("ROLLBACK;")
-            except duckdb.Error:
-                pass
+        _try_ddl(con, ddl, context="entities.geocode")
 
 
 def _ensure_temporal_columns(con: duckdb.DuckDBPyConnection) -> None:
@@ -175,13 +205,7 @@ def _ensure_temporal_columns(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE relationships ADD COLUMN valid_to TIMESTAMP;",
         "ALTER TABLE relationship_evidence ADD COLUMN event_time TIMESTAMP;",
     ):
-        try:
-            con.execute(ddl)
-        except (duckdb.CatalogException, duckdb.TransactionException):
-            try:
-                con.execute("ROLLBACK;")
-            except duckdb.Error:
-                pass
+        _try_ddl(con, ddl, context="relationships.temporal")
 
 
 def _ensure_document_columns(con: duckdb.DuckDBPyConnection) -> None:
@@ -190,39 +214,18 @@ def _ensure_document_columns(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE documents ADD COLUMN ocr_failed BOOLEAN DEFAULT false;",
         "ALTER TABLE documents ADD COLUMN thumbnail_blob BLOB;",
     ):
-        try:
-            con.execute(ddl)
-        except (duckdb.CatalogException, duckdb.TransactionException):
-            try:
-                con.execute("ROLLBACK;")
-            except duckdb.Error:
-                pass
+        _try_ddl(con, ddl, context="documents.format")
 
 
 def _ensure_graph_indexes(con: duckdb.DuckDBPyConnection) -> None:
-    # Traversal hot paths hit source_entity/target_entity on every hop. DuckDB
-    # has no separate CREATE INDEX pragma for these in older versions, so wrap
-    # each individually.
+    # Traversal hot paths hit source_entity/target_entity on every hop.
     for ddl in (
         "CREATE INDEX IF NOT EXISTS rel_source_idx ON relationships(source_entity);",
         "CREATE INDEX IF NOT EXISTS rel_target_idx ON relationships(target_entity);",
         "CREATE INDEX IF NOT EXISTS rel_evidence_rel_idx ON relationship_evidence(rel_id);",
         "CREATE INDEX IF NOT EXISTS entity_aliases_entity_idx ON entity_aliases(entity_id);",
     ):
-        try:
-            con.execute(ddl)
-        except (duckdb.CatalogException, duckdb.TransactionException):
-            try:
-                con.execute("ROLLBACK;")
-            except duckdb.Error:
-                pass
-        except duckdb.ParserException:
-            # Older DuckDB builds reject `IF NOT EXISTS` on indexes.
-            base = ddl.replace("IF NOT EXISTS ", "")
-            try:
-                con.execute(base)
-            except duckdb.CatalogException:
-                pass
+        _try_ddl(con, ddl, context="graph_index")
 
 
 def _ensure_ingestion_events_table(con: duckdb.DuckDBPyConnection) -> None:
@@ -262,13 +265,7 @@ def _ensure_entity_review_columns(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE entities ADD COLUMN reviewed_at TIMESTAMP;",
         "ALTER TABLE entities ADD COLUMN reviewed_by TEXT;",
     ):
-        try:
-            con.execute(ddl)
-        except (duckdb.CatalogException, duckdb.TransactionException):
-            try:
-                con.execute("ROLLBACK;")
-            except duckdb.Error:
-                pass
+        _try_ddl(con, ddl, context="entities.review")
 
 
 def _ensure_attachments_table(con: duckdb.DuckDBPyConnection) -> None:

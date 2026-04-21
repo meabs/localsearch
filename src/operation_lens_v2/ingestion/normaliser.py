@@ -61,11 +61,44 @@ def _strategy_phone_e164(raw: str, rule: NormaliseRule) -> str:
     return digits
 
 
+# UK plate formats in priority order. The first match wins, so more specific
+# patterns (fixed length) come before broader dateless fallbacks. Each entry is
+# ``(compiled_pattern, "group-joining template")`` — the template references
+# numbered capture groups and controls where the space lands.
+#
+# Refs: DVLA registration formats.
+#   Current  (2001+):      AA00 AAA   e.g. RX71 KLD
+#   Prefix   (1983–2001):  A000 AAA   e.g. A123 BCD   (also A/B/C 3-digit)
+#   Suffix   (1963–1983):  AAA 000A   e.g. ABC 123D
+#   Dateless (pre-1963):   AAA 000 or 000 AAA (variable length)
+_UK_PLATE_FORMATS: tuple[tuple[re.Pattern[str], str], ...] = (
+    # Current: 2 letters, 2 digits, 3 letters.
+    (re.compile(r"^([A-Z]{2}\d{2})([A-Z]{3})$"), r"\1 \2"),
+    # Prefix: 1 letter, 1-3 digits, 3 letters (total 5-7 chars).
+    (re.compile(r"^([A-Z]\d{1,3})([A-Z]{3})$"), r"\1 \2"),
+    # Suffix: 3 letters, 1-3 digits, 1 letter (total 5-7 chars).
+    (re.compile(r"^([A-Z]{3})(\d{1,3}[A-Z])$"), r"\1 \2"),
+    # Dateless variants: up to 3 letters + up to 4 digits (or reverse).
+    (re.compile(r"^([A-Z]{1,3})(\d{1,4})$"), r"\1 \2"),
+    (re.compile(r"^(\d{1,4})([A-Z]{1,3})$"), r"\1 \2"),
+)
+
+
 def _strategy_plate(raw: str, rule: NormaliseRule) -> str:
+    """Normalise a UK vehicle registration to its canonical spaced form.
+
+    Strips punctuation, uppercases, then matches against each known DVLA
+    format in priority order. Unrecognised shapes are returned compacted
+    (uppercase, no spaces) so downstream alias fuzzy-match can still see
+    them without us inventing a wrong split.
+    """
     cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
-    if 5 <= len(cleaned) <= 8:
-        split_point = max(2, len(cleaned) - 3)
-        return f"{cleaned[:split_point]} {cleaned[split_point:]}"
+    if not cleaned:
+        return cleaned
+    for pattern, template in _UK_PLATE_FORMATS:
+        match = pattern.match(cleaned)
+        if match:
+            return pattern.sub(template, cleaned)
     return cleaned
 
 
