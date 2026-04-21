@@ -86,6 +86,9 @@ def test_media_object_graph_returns_assets_frames_and_objects(tmp_path, monkeypa
         "MEDIA_OBJECT",
     }
     assert any(edge["type"] == "NEAR" for edge in result["edges"])
+    stored_frame = duck_store.get_media_frame(con, frame_id)
+    assert stored_frame is not None
+    assert stored_frame["image_path"] == "data/media_frames/frame.jpg"
 
 
 def test_find_ffmpeg_prefers_configured_executable(tmp_path, monkeypatch) -> None:

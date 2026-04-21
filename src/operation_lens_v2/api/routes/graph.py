@@ -463,6 +463,23 @@ def media_network(case_ref: str | None = None, limit: int = 500) -> dict[str, ob
     return duck_store.list_media_object_graph(con, case_ref=case_ref, limit=limit)
 
 
+@router.get("/media-frames/{frame_id}")
+def media_frame_file(frame_id: str) -> FileResponse:
+    """Serve an extracted media frame so the UI can show the visual evidence."""
+    con = get_duck_connection(settings.duckdb_path)
+    duck_store.ensure_media_object_tables(con)
+    frame = duck_store.get_media_frame(con, frame_id)
+    if not frame:
+        raise HTTPException(status_code=404, detail="Media frame not found")
+    path = Path(str(frame["image_path"]))
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Media frame file missing")
+    media_type = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+    return FileResponse(path=path, media_type=media_type, filename=path.name)
+
+
 @router.get("/locations")
 def locations(case_ref: str | None = None, limit: int = 500) -> dict[str, object]:
     """Return geocoded LOCATION entities for the case-wide map view.

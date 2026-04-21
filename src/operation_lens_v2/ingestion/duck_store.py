@@ -754,6 +754,30 @@ def insert_media_frame(
     return frame_id
 
 
+def get_media_frame(
+    con: duckdb.DuckDBPyConnection,
+    frame_id: str,
+) -> dict[str, object] | None:
+    row = con.execute(
+        """
+        SELECT frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path
+        FROM media_frames
+        WHERE frame_id = ?
+        """,
+        [frame_id],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "frame_id": row[0],
+        "asset_id": row[1],
+        "doc_id": row[2],
+        "timestamp_seconds": float(row[3] or 0),
+        "frame_index": int(row[4] or 0),
+        "image_path": row[5],
+    }
+
+
 def insert_media_detection(
     con: duckdb.DuckDBPyConnection,
     *,

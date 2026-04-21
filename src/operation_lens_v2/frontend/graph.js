@@ -371,6 +371,164 @@
       });
   }
 
+  function frameIdForNode(node) {
+    if (!node) return "";
+    if (node.frame_id) return String(node.frame_id);
+    const id = String(node.id || "");
+    return id.startsWith("frame:") ? id.slice("frame:".length) : "";
+  }
+
+  function mediaFrameUrl(frameId) {
+    return apiUrl(`/graph/media-frames/${encodeURIComponent(frameId)}`);
+  }
+
+  function mediaPreviewHtml(node, { compact = false } = {}) {
+    const frameId = frameIdForNode(node);
+    if (!frameId) return "";
+    const bbox = Array.isArray(node?.bbox) ? escHtml(JSON.stringify(node.bbox)) : "";
+    return `
+      <div class="media-frame-image-wrap ${compact ? "compact" : ""}">
+        <img class="media-frame-img" src="${mediaFrameUrl(frameId)}" alt="${escHtml(node.label || "media frame")}" loading="lazy" />
+        ${
+          bbox
+            ? `<span class="media-bbox active" data-bbox="${bbox}" title="${escHtml(node.label || "detection")}"></span>`
+            : ""
+        }
+      </div>
+    `;
+  }
+
+  function positionMediaBoxes(root) {
+    (root || document).querySelectorAll(".media-frame-image-wrap").forEach((wrap) => {
+      const img = wrap.querySelector(".media-frame-img");
+      if (!img) return;
+      const update = () => {
+        const width = img.naturalWidth || 1;
+        const height = img.naturalHeight || 1;
+        wrap.querySelectorAll(".media-bbox[data-bbox]").forEach((box) => {
+          let bbox = [];
+          try {
+            bbox = JSON.parse(box.getAttribute("data-bbox") || "[]");
+          } catch (_) {
+            bbox = [];
+          }
+          if (!Array.isArray(bbox) || bbox.length !== 4) return;
+          const [x1, y1, x2, y2] = bbox.map(Number);
+          box.style.left = `${Math.max(0, Math.min(100, (x1 / width) * 100))}%`;
+          box.style.top = `${Math.max(0, Math.min(100, (y1 / height) * 100))}%`;
+          box.style.width = `${Math.max(1, Math.min(100, ((x2 - x1) / width) * 100))}%`;
+          box.style.height = `${Math.max(1, Math.min(100, ((y2 - y1) / height) * 100))}%`;
+        });
+      };
+      if (img.complete) update();
+      else img.addEventListener("load", update, { once: true });
+    });
+  }
+
+  function frameSortValue(node) {
+    return Number(node.timestamp_seconds ?? node.frame_index ?? 0);
+  }
+
+  function renderMediaReview(data, nodes, edges) {
+    if (cy) {
+      cy.destroy();
+      cy = null;
+    }
+    cyRoot.classList.add("media-review-root");
+    const assets = nodes.filter((node) => node.entity_type === "MEDIA_ASSET");
+    const frames = nodes
+      .filter((node) => node.entity_type === "MEDIA_FRAME")
+      .sort((a, b) => frameSortValue(a) - frameSortValue(b));
+    const objects = nodes.filter((node) => node.entity_type === "MEDIA_OBJECT");
+    const detectionsByFrame = new Map();
+    objects.forEach((node) => {
+      const key = String(node.frame_id || "");
+      if (!detectionsByFrame.has(key)) detectionsByFrame.set(key, []);
+      detectionsByFrame.get(key).push(node);
+    });
+    detectionsByFrame.forEach((items) =>
+      items.sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0)),
+    );
+    const frameCards = frames
+      .map((frame) => {
+        const frameId = frameIdForNode(frame);
+        const detections = detectionsByFrame.get(frameId) || [];
+        const boxes = detections
+          .filter((item) => Array.isArray(item.bbox))
+          .map(
+            (item) =>
+              `<span class="media-bbox" data-node-id="${escHtml(item.id)}" data-bbox="${escHtml(
+                JSON.stringify(item.bbox),
+              )}" title="${escHtml(item.label)}"></span>`,
+          )
+          .join("");
+        const chips = detections.length
+          ? detections
+              .map(
+                (item) => `<button type="button" class="media-object-chip" data-node-id="${escHtml(item.id)}">
+                  ${escHtml(item.object_label || "object")} ${(Number(item.confidence || 0)).toFixed(2)}
+                </button>`,
+              )
+              .join("")
+          : '<span class="media-no-detections">No objects</span>';
+        return `
+          <article class="media-frame-card" data-node-id="${escHtml(frame.id)}">
+            <div class="media-frame-image-wrap">
+              <img class="media-frame-img" src="${mediaFrameUrl(frameId)}" alt="${escHtml(frame.label)}" loading="lazy" />
+              ${boxes}
+            </div>
+            <div class="media-frame-card-meta">
+              <span>${escHtml(frame.label)}</span>
+              <strong>${detections.length} detection${detections.length === 1 ? "" : "s"}</strong>
+            </div>
+            <div class="media-detection-list">${chips}</div>
+          </article>
+        `;
+      })
+      .join("");
+    const labelCounts = objects.reduce((acc, item) => {
+      const label = String(item.object_label || "object");
+      acc.set(label, (acc.get(label) || 0) + 1);
+      return acc;
+    }, new Map());
+    const labelSummary = Array.from(labelCounts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([label, count]) => `<span class="media-summary-pill">${escHtml(label)} ${count}</span>`)
+      .join("");
+    cyRoot.innerHTML = `
+      <div class="media-review-board">
+        <div class="media-review-summary">
+          <div>
+            <div class="media-review-kicker">Visual Evidence</div>
+            <div class="media-review-title">${escHtml(assets[0]?.label || data.case_ref || "Media review")}</div>
+          </div>
+          <div class="media-review-metrics">
+            <span>${Number(data.meta?.frame_count || frames.length)} frames</span>
+            <span>${Number(data.meta?.detection_count || objects.length)} detections</span>
+            <span>${Number(data.meta?.asset_count || assets.length)} assets</span>
+          </div>
+        </div>
+        <div class="media-summary-pills">${labelSummary || '<span class="media-summary-pill">No object detections</span>'}</div>
+        <div class="media-frame-grid">${frameCards || '<div class="timeline-empty">No frames were extracted for this media.</div>'}</div>
+      </div>
+    `;
+    positionMediaBoxes(cyRoot);
+    cyRoot.querySelectorAll(".media-frame-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const node = nodes.find((item) => item.id === card.getAttribute("data-node-id"));
+        setMediaDetail(node, edges, nodes, null);
+      });
+    });
+    cyRoot.querySelectorAll(".media-object-chip,.media-bbox").forEach((control) => {
+      control.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const node = nodes.find((item) => item.id === control.getAttribute("data-node-id"));
+        setMediaDetail(node, edges, nodes, null);
+      });
+    });
+    setMediaDetail(objects[0] || frames[0] || assets[0] || null, edges, nodes, null);
+  }
+
   function setMediaDetail(node, edges, nodes, edge = null) {
     if (!node && !edge) {
       detail.innerHTML =
@@ -393,6 +551,7 @@
     const bbox = Array.isArray(node.bbox) ? node.bbox.map((v) => Number(v).toFixed(1)).join(", ") : "";
     detail.innerHTML = `
       <div class="node-detail-header">${escHtml(node.label)}</div>
+      ${mediaPreviewHtml(node)}
       <div class="detail-field"><span class="detail-key">TYPE</span><span class="detail-val">${escHtml(node.entity_type || "UNKNOWN")}</span></div>
       ${node.media_type ? `<div class="detail-field"><span class="detail-key">MEDIA</span><span class="detail-val">${escHtml(node.media_type)}</span></div>` : ""}
       ${node.object_label ? `<div class="detail-field"><span class="detail-key">OBJECT</span><span class="detail-val">${escHtml(node.object_label)}</span></div>` : ""}
@@ -402,8 +561,8 @@
       ${node.filepath ? `<div class="detail-field"><span class="detail-key">FILE</span><span class="detail-val">${escHtml(node.filepath)}</span></div>` : ""}
       ${node.image_path ? `<div class="detail-field"><span class="detail-key">FRAME</span><span class="detail-val">${escHtml(node.image_path)}</span></div>` : ""}
       <div class="detail-field"><span class="detail-key">LINKS</span><span class="detail-val">${linked.length}</span></div>
-      <div class="node-empty" style="margin-top:12px;">This graph is separate from transcript entities. It links media assets to sampled frames and detected objects.</div>
     `;
+    positionMediaBoxes(detail);
   }
 
   function setDetail(node, edges, nodes, edge = null) {
@@ -550,10 +709,13 @@
     if (graphSubmitBtn) graphSubmitBtn.textContent = isMedia ? "Load media graph" : "Expand network";
     if (graphCanvasStatus) {
       graphCanvasStatus.textContent = isMedia
-        ? "Media assets, sampled frames and detected object links"
+        ? "Frame thumbnails, detections and spatial links"
         : "Weighted by mentions and confidence";
     }
     if (crossDocToggle) crossDocToggle.disabled = isMedia;
+    if (layoutSelect) layoutSelect.disabled = isMedia;
+    if (relayoutBtn) relayoutBtn.disabled = isMedia;
+    if (fitBtn) fitBtn.disabled = isMedia;
   }
 
   function persistGraphView() {
@@ -608,6 +770,23 @@
       return;
     }
     const nodes = data.nodes || [];
+    if (graphView.mode === "media") {
+      const edges = data.edges || [];
+      if (!nodes.length) {
+        if (cy) {
+          cy.destroy();
+          cy = null;
+        }
+        cyRoot.classList.add("media-review-root");
+        cyRoot.innerHTML =
+          '<div class="timeline-empty">No media-object graph exists for this operation yet. Upload an image/video and ingest it first.</div>';
+        setDetail(null, [], []);
+        return;
+      }
+      renderMediaReview(data, nodes, edges);
+      return;
+    }
+    cyRoot.classList.remove("media-review-root");
     const rawEdges = (data.edges || []).filter((edge) => {
       const conf = Number(edge.confidence || 0);
       const isCrossDoc = Number(edge.distinct_doc_count || 0) > 1;
