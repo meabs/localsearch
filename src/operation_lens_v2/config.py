@@ -78,8 +78,10 @@ class Settings(BaseSettings):
     whisper_model: str = Field(default="base", alias="WHISPER_MODEL")
     ffmpeg_path: str = Field(default="", alias="FFMPEG_PATH")
     media_object_detection_model: str = Field(
-        default="yolov8n.pt", alias="MEDIA_OBJECT_DETECTION_MODEL"
+        default="data/models/yolov8n.pt", alias="MEDIA_OBJECT_DETECTION_MODEL"
     )
+    media_object_frame_count: int = Field(default=8, alias="MEDIA_OBJECT_FRAME_COUNT")
+    media_object_confidence: float = Field(default=0.25, alias="MEDIA_OBJECT_CONFIDENCE")
     trocr_model: str = Field(
         default="microsoft/trocr-base-handwritten", alias="TROCR_MODEL"
     )

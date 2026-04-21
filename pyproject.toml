@@ -34,6 +34,9 @@ dev = [
   "piexif>=1.1.3",
   "ruff>=0.6.9",
 ]
+media = [
+  "ultralytics>=8.4.41",
+]
 
 [tool.ruff]
 line-length = 100
