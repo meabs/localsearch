@@ -49,6 +49,7 @@ def test_media_object_graph_returns_assets_frames_and_objects(tmp_path, monkeypa
         doc_id=doc_id,
         label="person",
         confidence=0.92,
+        description="Person detected near the centre of the frame.",
         x1=1,
         y1=2,
         x2=30,
@@ -61,6 +62,7 @@ def test_media_object_graph_returns_assets_frames_and_objects(tmp_path, monkeypa
         doc_id=doc_id,
         label="bag",
         confidence=0.74,
+        description="Bag detected on the right of the frame.",
         x1=35,
         y1=3,
         x2=50,
@@ -86,6 +88,11 @@ def test_media_object_graph_returns_assets_frames_and_objects(tmp_path, monkeypa
         "MEDIA_ASSET",
         "MEDIA_FRAME",
         "MEDIA_OBJECT",
+    }
+    object_nodes = [node for node in result["nodes"] if node["entity_type"] == "MEDIA_OBJECT"]
+    assert {node["description"] for node in object_nodes} == {
+        "Person detected near the centre of the frame.",
+        "Bag detected on the right of the frame.",
     }
     assert any(edge["type"] == "NEAR" for edge in result["edges"])
     stored_frame = duck_store.get_media_frame(con, frame_id)
@@ -116,7 +123,11 @@ async def test_media_object_vector_rows_index_detection_text(monkeypatch) -> Non
                 {
                     "detection_id": "det-1",
                     "frame_index": 2,
-                    "text": "Media object detection in clip.mp4: person at frame 3.",
+                    "description": "Person detected in clip.mp4 at 3.0s near the centre.",
+                    "text": (
+                        "Person detected in clip.mp4 at 3.0s near the centre. "
+                        "Bounding box [1, 2, 3, 4]."
+                    ),
                 }
             ]
         },
@@ -124,4 +135,4 @@ async def test_media_object_vector_rows_index_detection_text(monkeypatch) -> Non
 
     assert chunks[0].chunk_id == "media-object:det-1"
     assert chunks[0].page == 3
-    assert rows[0]["text"].startswith("Media object detection")
+    assert rows[0]["text"].startswith("Person detected")

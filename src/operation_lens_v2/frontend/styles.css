@@ -1121,6 +1121,7 @@ input[type="file"]::-webkit-file-upload-button {
   display: flex;
   align-items: flex-start;
   gap: 14px;
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 8px;
@@ -1227,6 +1228,130 @@ input[type="file"]::-webkit-file-upload-button {
 
 .media-frame-card-meta strong {
   color: var(--ink-soft);
+}
+
+.media-object-graph-panel {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--border-0);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.024);
+}
+
+.media-object-graph-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.media-object-graph-head strong {
+  color: var(--amber-100);
+  white-space: nowrap;
+}
+
+.media-object-node-map {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.media-object-node {
+  min-width: 108px;
+  min-height: 54px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(77, 182, 200, 0.32);
+  border-radius: 8px;
+  background: rgba(77, 182, 200, 0.07);
+}
+
+.media-object-node span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.media-object-node strong {
+  color: #ecfff7;
+  font-size: 1rem;
+}
+
+.media-object-edge-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.media-object-edge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid rgba(133, 170, 206, 0.14);
+  border-radius: 8px;
+  background: rgba(5, 8, 13, 0.58);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.media-object-edge span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-object-edge strong {
+  color: var(--amber-100);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.media-object-edge em {
+  color: var(--ink-faint);
+  font-style: normal;
+  text-align: right;
+}
+
+.media-object-graph-empty {
+  padding: 12px;
+  border: 1px dashed var(--border-0);
+  border-radius: 8px;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.media-detection-description {
+  margin: 12px 0 2px;
+  padding: 11px 12px;
+  border: 1px solid rgba(77, 182, 200, 0.22);
+  border-radius: 8px;
+  background: rgba(77, 182, 200, 0.055);
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 
 #cy-overlay {
@@ -1382,6 +1507,8 @@ input[type="file"]::-webkit-file-upload-button {
   font-weight: 700;
   text-align: right;
   line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .entity-attach-shell {

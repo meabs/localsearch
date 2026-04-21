@@ -432,6 +432,107 @@
     return Number(node.timestamp_seconds ?? node.frame_index ?? 0);
   }
 
+  function renderMediaObjectGraph(objects, edges) {
+    const objectNodes = objects || [];
+    if (!objectNodes.length) {
+      return `
+        <section class="media-object-graph-panel">
+          <div class="media-object-graph-head">
+            <span>Detected Object Graph</span>
+            <strong>No detections</strong>
+          </div>
+          <div class="media-object-graph-empty">No detected objects were found in this media file.</div>
+        </section>
+      `;
+    }
+
+    const labelCounts = new Map();
+    const objectById = new Map();
+    const frameGroups = new Map();
+    objectNodes.forEach((item) => {
+      const label = String(item.object_label || "object");
+      labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+      objectById.set(item.id, item);
+      const frameKey = String(item.frame_id || "");
+      if (!frameGroups.has(frameKey)) frameGroups.set(frameKey, []);
+      frameGroups.get(frameKey).push(item);
+    });
+
+    const nodesHtml = Array.from(labelCounts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(
+        ([label, count]) => `
+          <div class="media-object-node">
+            <span>${escHtml(label)}</span>
+            <strong>${count}</strong>
+          </div>
+        `,
+      )
+      .join("");
+
+    const cooccurrence = new Map();
+    frameGroups.forEach((items) => {
+      const labels = Array.from(new Set(items.map((item) => String(item.object_label || "object")))).sort();
+      for (let i = 0; i < labels.length; i += 1) {
+        for (let j = i + 1; j < labels.length; j += 1) {
+          const key = `${labels[i]}||${labels[j]}`;
+          cooccurrence.set(key, (cooccurrence.get(key) || 0) + 1);
+        }
+      }
+    });
+
+    const spatialEdges = (edges || [])
+      .filter((edge) => !["HAS_FRAME", "HAS_DETECTION"].includes(edge.type))
+      .map((edge) => {
+        const source = objectById.get(edge.source);
+        const target = objectById.get(edge.target);
+        if (!source || !target) return "";
+        return `
+          <div class="media-object-edge">
+            <span>${escHtml(source.object_label || source.label)}</span>
+            <strong>${escHtml(edge.type || "LINKED")}</strong>
+            <span>${escHtml(target.object_label || target.label)}</span>
+            <em>${Number(edge.confidence || 0).toFixed(2)}</em>
+          </div>
+        `;
+      })
+      .filter(Boolean);
+
+    const cooccurrenceEdges = Array.from(cooccurrence.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 12)
+      .map(([key, count]) => {
+        const [left, right] = key.split("||");
+        return `
+          <div class="media-object-edge">
+            <span>${escHtml(left)}</span>
+            <strong>SAME FRAME</strong>
+            <span>${escHtml(right)}</span>
+            <em>${count}</em>
+          </div>
+        `;
+      });
+
+    const edgesHtml = [...spatialEdges.slice(0, 12), ...cooccurrenceEdges].join("");
+    const edgeFallback =
+      objectNodes.length === 1
+        ? "Only one object was detected, so there are no cross-object links yet."
+        : "No cross-object links were inferred for the sampled frames.";
+
+    return `
+      <section class="media-object-graph-panel">
+        <div class="media-object-graph-head">
+          <span>Detected Object Graph</span>
+          <strong>${objectNodes.length} object${objectNodes.length === 1 ? "" : "s"}</strong>
+        </div>
+        <div class="media-object-node-map">${nodesHtml}</div>
+        <div class="media-object-edge-list">
+          ${edgesHtml || `<div class="media-object-graph-empty">${escHtml(edgeFallback)}</div>`}
+        </div>
+      </section>
+    `;
+  }
+
   function renderMediaReview(data, nodes, edges) {
     if (cy) {
       cy.destroy();
@@ -462,13 +563,15 @@
             (item) =>
               `<span class="media-bbox" data-node-id="${escHtml(item.id)}" data-bbox="${escHtml(
                 JSON.stringify(item.bbox),
-              )}" title="${escHtml(item.label)}"></span>`,
+              )}" title="${escHtml(item.description || item.label)}"></span>`,
           )
           .join("");
         const chips = detections.length
           ? detections
               .map(
-                (item) => `<button type="button" class="media-object-chip" data-node-id="${escHtml(item.id)}">
+                (item) => `<button type="button" class="media-object-chip" data-node-id="${escHtml(item.id)}" title="${escHtml(
+                  item.description || item.label,
+                )}">
                   ${escHtml(item.object_label || "object")} ${(Number(item.confidence || 0)).toFixed(2)}
                 </button>`,
               )
@@ -513,6 +616,7 @@
         </div>
         <div class="media-summary-pills">${labelSummary || '<span class="media-summary-pill">No object detections</span>'}</div>
         <div class="media-frame-grid">${frameCards || '<div class="timeline-empty">No frames were extracted for this media.</div>'}</div>
+        ${renderMediaObjectGraph(objects, edges)}
       </div>
     `;
     positionMediaBoxes(cyRoot);
@@ -555,6 +659,7 @@
     detail.innerHTML = `
       <div class="node-detail-header">${escHtml(node.label)}</div>
       ${mediaPreviewHtml(node, { compact: true })}
+      ${node.description ? `<div class="media-detection-description">${escHtml(node.description)}</div>` : ""}
       <div class="detail-field"><span class="detail-key">TYPE</span><span class="detail-val">${escHtml(node.entity_type || "UNKNOWN")}</span></div>
       ${node.media_type ? `<div class="detail-field"><span class="detail-key">MEDIA</span><span class="detail-val">${escHtml(node.media_type)}</span></div>` : ""}
       ${node.object_label ? `<div class="detail-field"><span class="detail-key">OBJECT</span><span class="detail-val">${escHtml(node.object_label)}</span></div>` : ""}

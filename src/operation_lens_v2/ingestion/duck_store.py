@@ -315,6 +315,7 @@ def ensure_media_object_tables(con: duckdb.DuckDBPyConnection) -> None:
           doc_id TEXT REFERENCES documents(doc_id),
           label TEXT NOT NULL,
           confidence FLOAT DEFAULT 0,
+          description TEXT,
           x1 DOUBLE,
           y1 DOUBLE,
           x2 DOUBLE,
@@ -348,11 +349,16 @@ def ensure_media_object_tables(con: duckdb.DuckDBPyConnection) -> None:
         "CREATE INDEX IF NOT EXISTS media_frames_asset_idx ON media_frames(asset_id);",
         "CREATE INDEX IF NOT EXISTS media_detections_frame_idx ON media_detections(frame_id);",
         (
-            "CREATE INDEX IF NOT EXISTS media_object_rel_asset_idx "
+        "CREATE INDEX IF NOT EXISTS media_object_rel_asset_idx "
             "ON media_object_relationships(asset_id);"
         ),
     ):
         _try_ddl(con, ddl, context="media_object_index")
+    _try_ddl(
+        con,
+        "ALTER TABLE media_detections ADD COLUMN description TEXT;",
+        context="media_detections.description",
+    )
 
 
 def _ensure_entity_review_columns(con: duckdb.DuckDBPyConnection) -> None:
@@ -786,6 +792,7 @@ def insert_media_detection(
     doc_id: str,
     label: str,
     confidence: float,
+    description: str | None = None,
     x1: float,
     y1: float,
     x2: float,
@@ -795,11 +802,23 @@ def insert_media_detection(
     con.execute(
         """
         INSERT INTO media_detections (
-          detection_id, frame_id, asset_id, doc_id, label, confidence, x1, y1, x2, y2
+          detection_id, frame_id, asset_id, doc_id, label, confidence, description, x1, y1, x2, y2
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [detection_id, frame_id, asset_id, doc_id, label, confidence, x1, y1, x2, y2],
+        [
+            detection_id,
+            frame_id,
+            asset_id,
+            doc_id,
+            label,
+            confidence,
+            description,
+            x1,
+            y1,
+            x2,
+            y2,
+        ],
     )
     return detection_id
 
@@ -852,11 +871,25 @@ def list_media_object_graph(
 
     assets = con.execute(
         f"""
-        SELECT ma.asset_id, ma.doc_id, ma.filename, ma.filepath, ma.media_type
-        FROM media_assets ma
-        {case_join}
-        {case_where}
-        ORDER BY ma.created_at DESC, ma.filename
+        SELECT asset_id, doc_id, filename, filepath, media_type
+        FROM (
+          SELECT
+            ma.asset_id,
+            ma.doc_id,
+            ma.filename,
+            ma.filepath,
+            ma.media_type,
+            ma.created_at,
+            row_number() OVER (
+              PARTITION BY lower(ma.filename)
+              ORDER BY ma.created_at DESC, ma.asset_id DESC
+            ) AS latest_rank
+          FROM media_assets ma
+          {case_join}
+          {case_where}
+        )
+        WHERE latest_rank = 1
+        ORDER BY created_at DESC, filename
         LIMIT ?
         """,
         [*params, max(1, limit)],
@@ -883,7 +916,8 @@ def list_media_object_graph(
     ).fetchall()
     detections = con.execute(
         f"""
-        SELECT detection_id, frame_id, asset_id, doc_id, label, confidence, x1, y1, x2, y2
+        SELECT detection_id, frame_id, asset_id, doc_id, label, confidence,
+               description, x1, y1, x2, y2
         FROM media_detections
         WHERE asset_id IN ({placeholders})
         ORDER BY asset_id, frame_id, confidence DESC
@@ -946,13 +980,26 @@ def list_media_object_graph(
             }
         )
     for row in detections:
-        detection_id, frame_id, asset_id, doc_id, label, confidence, x1, y1, x2, y2 = row
+        (
+            detection_id,
+            frame_id,
+            asset_id,
+            doc_id,
+            label,
+            confidence,
+            description,
+            x1,
+            y1,
+            x2,
+            y2,
+        ) = row
         nodes.append(
             {
                 "id": f"object:{detection_id}",
                 "label": f"{label} {float(confidence or 0):.2f}",
                 "entity_type": "MEDIA_OBJECT",
                 "object_label": label,
+                "description": description or "",
                 "asset_id": asset_id,
                 "doc_id": doc_id,
                 "frame_id": frame_id,

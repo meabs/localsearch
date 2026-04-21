@@ -237,6 +237,49 @@ def _near(a: list[float], b: list[float], image_width: int, image_height: int) -
     return distance / diagonal <= 0.22
 
 
+def _bbox_position(bbox: list[float], image_width: int, image_height: int) -> str:
+    width = max(float(image_width), 1.0)
+    height = max(float(image_height), 1.0)
+    center_x = ((bbox[0] + bbox[2]) / 2) / width
+    center_y = ((bbox[1] + bbox[3]) / 2) / height
+    horizontal = "left" if center_x < 0.34 else "right" if center_x > 0.66 else "centre"
+    vertical = "upper" if center_y < 0.34 else "lower" if center_y > 0.66 else "middle"
+    if horizontal == "centre" and vertical == "middle":
+        return "near the centre of the frame"
+    return f"in the {vertical} {horizontal} of the frame"
+
+
+def _bbox_scale(bbox: list[float], image_width: int, image_height: int) -> str:
+    image_area = max(float(image_width * image_height), 1.0)
+    area = max((bbox[2] - bbox[0]) * (bbox[3] - bbox[1]), 0.0)
+    ratio = area / image_area
+    if ratio >= 0.30:
+        return "large"
+    if ratio >= 0.08:
+        return "medium-sized"
+    return "small"
+
+
+def _describe_detection(
+    *,
+    media_name: str,
+    label: str,
+    confidence: float,
+    frame_index: int,
+    timestamp_seconds: float,
+    bbox: list[float],
+    image_width: int,
+    image_height: int,
+) -> str:
+    position = _bbox_position(bbox, image_width, image_height)
+    scale = _bbox_scale(bbox, image_width, image_height)
+    return (
+        f"{label.title()} detected in {media_name} at {timestamp_seconds:.1f}s "
+        f"(sampled frame {frame_index + 1}); the detector places a {scale} "
+        f"{label} {position} with confidence {confidence:.2f}."
+    )
+
+
 def extract_media_objects(
     con,
     *,
@@ -303,17 +346,31 @@ def extract_media_objects(
             bbox = item["bbox"]
             if not isinstance(bbox, list) or len(bbox) != 4:
                 continue
+            label = str(item["label"])
+            confidence = float(item["confidence"])
+            bbox_values = [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])]
+            description = _describe_detection(
+                media_name=media_path.name,
+                label=label,
+                confidence=confidence,
+                frame_index=frame_index,
+                timestamp_seconds=timestamp_seconds,
+                bbox=bbox_values,
+                image_width=width,
+                image_height=height,
+            )
             detection_id = duck_store.insert_media_detection(
                 con,
                 frame_id=frame_id,
                 asset_id=asset_id,
                 doc_id=doc_id,
-                label=str(item["label"]),
-                confidence=float(item["confidence"]),
-                x1=float(bbox[0]),
-                y1=float(bbox[1]),
-                x2=float(bbox[2]),
-                y2=float(bbox[3]),
+                label=label,
+                confidence=confidence,
+                description=description,
+                x1=bbox_values[0],
+                y1=bbox_values[1],
+                x2=bbox_values[2],
+                y2=bbox_values[3],
             )
             detection_ids.append((detection_id, item))
             evidence_texts.append(
@@ -322,16 +379,15 @@ def extract_media_objects(
                     "frame_id": frame_id,
                     "frame_index": frame_index,
                     "timestamp_seconds": timestamp_seconds,
-                    "label": str(item["label"]),
-                    "confidence": float(item["confidence"]),
-                    "bbox": [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])],
+                    "label": label,
+                    "confidence": confidence,
+                    "bbox": bbox_values,
+                    "description": description,
                     "frame_path": str(frame_path),
                     "text": (
-                        f"Media object detection in {media_path.name}: "
-                        f"{item['label']} at frame {frame_index + 1} "
-                        f"({timestamp_seconds:.1f}s), confidence {float(item['confidence']):.2f}, "
-                        f"bounding box [{float(bbox[0]):.1f}, {float(bbox[1]):.1f}, "
-                        f"{float(bbox[2]):.1f}, {float(bbox[3]):.1f}]."
+                        f"{description} Bounding box "
+                        f"[{bbox_values[0]:.1f}, {bbox_values[1]:.1f}, "
+                        f"{bbox_values[2]:.1f}, {bbox_values[3]:.1f}]."
                     ),
                 }
             )
