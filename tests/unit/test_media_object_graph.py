@@ -108,6 +108,41 @@ def test_find_ffmpeg_prefers_configured_executable(tmp_path, monkeypatch) -> Non
     assert media_objects.find_ffmpeg_executable() == ffmpeg
 
 
+def test_media_object_graph_keeps_multiple_distinct_files(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "media-graph-multiple.duckdb"
+    con = duck_store.init_db(str(db_path))
+    monkeypatch.setattr(settings, "duckdb_path", str(db_path))
+
+    case_id = duck_store.create_case(con, case_ref="MEDIA_MULTI", case_name="Media Multi")
+    for index, source_hash in enumerate(["hash-a", "hash-b", "hash-a"], start=1):
+        doc_id = str(uuid.uuid4())
+        duck_store.upsert_document(
+            con,
+            doc_id=doc_id,
+            filename="clip.mp4",
+            filepath=f"C:/evidence/session-{index}/clip.mp4",
+            page_count=1,
+            ocr_used=False,
+            case_id=case_id,
+            doc_format="media",
+            source_hash=source_hash,
+        )
+        duck_store.upsert_media_asset(
+            con,
+            doc_id=doc_id,
+            case_id=case_id,
+            filename="clip.mp4",
+            filepath=f"C:/evidence/session-{index}/clip.mp4",
+            media_type="audio_video",
+        )
+
+    result = media_network(case_ref="MEDIA_MULTI")
+
+    asset_nodes = [node for node in result["nodes"] if node["entity_type"] == "MEDIA_ASSET"]
+    assert result["meta"]["asset_count"] == 2
+    assert len(asset_nodes) == 2
+
+
 async def _embed_stub(_text: str) -> list[float]:
     return [0.1] * 768
 

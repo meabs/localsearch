@@ -881,10 +881,11 @@ def list_media_object_graph(
             ma.media_type,
             ma.created_at,
             row_number() OVER (
-              PARTITION BY lower(ma.filename)
+              PARTITION BY coalesce(d.source_hash, lower(ma.filepath), lower(ma.filename))
               ORDER BY ma.created_at DESC, ma.asset_id DESC
             ) AS latest_rank
           FROM media_assets ma
+          LEFT JOIN documents d ON d.doc_id = ma.doc_id
           {case_join}
           {case_where}
         )

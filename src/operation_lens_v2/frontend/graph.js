@@ -533,6 +533,44 @@
     `;
   }
 
+  function renderMediaFrameCard(frame, detectionsByFrame) {
+    const frameId = frameIdForNode(frame);
+    const detections = detectionsByFrame.get(frameId) || [];
+    const boxes = detections
+      .filter((item) => Array.isArray(item.bbox))
+      .map(
+        (item) =>
+          `<span class="media-bbox" data-node-id="${escHtml(item.id)}" data-bbox="${escHtml(
+            JSON.stringify(item.bbox),
+          )}" title="${escHtml(item.description || item.label)}"></span>`,
+      )
+      .join("");
+    const chips = detections.length
+      ? detections
+          .map(
+            (item) => `<button type="button" class="media-object-chip" data-node-id="${escHtml(item.id)}" title="${escHtml(
+              item.description || item.label,
+            )}">
+              ${escHtml(item.object_label || "object")} ${(Number(item.confidence || 0)).toFixed(2)}
+            </button>`,
+          )
+          .join("")
+      : '<span class="media-no-detections">No objects</span>';
+    return `
+      <article class="media-frame-card" data-node-id="${escHtml(frame.id)}">
+        <div class="media-frame-image-wrap">
+          <img class="media-frame-img" src="${mediaFrameUrl(frameId)}" alt="${escHtml(frame.label)}" loading="lazy" />
+          ${boxes}
+        </div>
+        <div class="media-frame-card-meta">
+          <span>${escHtml(frame.label)}</span>
+          <strong>${detections.length} detection${detections.length === 1 ? "" : "s"}</strong>
+        </div>
+        <div class="media-detection-list">${chips}</div>
+      </article>
+    `;
+  }
+
   function renderMediaReview(data, nodes, edges) {
     if (cy) {
       cy.destroy();
@@ -553,45 +591,60 @@
     detectionsByFrame.forEach((items) =>
       items.sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0)),
     );
-    const frameCards = frames
-      .map((frame) => {
-        const frameId = frameIdForNode(frame);
-        const detections = detectionsByFrame.get(frameId) || [];
-        const boxes = detections
-          .filter((item) => Array.isArray(item.bbox))
-          .map(
-            (item) =>
-              `<span class="media-bbox" data-node-id="${escHtml(item.id)}" data-bbox="${escHtml(
-                JSON.stringify(item.bbox),
-              )}" title="${escHtml(item.description || item.label)}"></span>`,
-          )
+
+    const framesByAsset = new Map();
+    frames.forEach((frame) => {
+      const assetId = String(frame.asset_id || "");
+      if (!framesByAsset.has(assetId)) framesByAsset.set(assetId, []);
+      framesByAsset.get(assetId).push(frame);
+    });
+
+    const objectsByAsset = new Map();
+    objects.forEach((object) => {
+      const assetId = String(object.asset_id || "");
+      if (!objectsByAsset.has(assetId)) objectsByAsset.set(assetId, []);
+      objectsByAsset.get(assetId).push(object);
+    });
+
+    const assetSections = assets
+      .map((asset) => {
+        const assetId = String(asset.id || "").startsWith("asset:")
+          ? String(asset.id).slice("asset:".length)
+          : String(asset.asset_id || "");
+        const assetFrames = (framesByAsset.get(assetId) || []).sort(
+          (a, b) => frameSortValue(a) - frameSortValue(b),
+        );
+        const assetObjects = objectsByAsset.get(assetId) || [];
+        const assetObjectIds = new Set(assetObjects.map((item) => item.id));
+        const assetEdges = edges.filter((edge) => {
+          if (edge.asset_id === assetId) return true;
+          return assetObjectIds.has(edge.source) || assetObjectIds.has(edge.target);
+        });
+        const frameCards = assetFrames
+          .map((frame) => renderMediaFrameCard(frame, detectionsByFrame))
           .join("");
-        const chips = detections.length
-          ? detections
-              .map(
-                (item) => `<button type="button" class="media-object-chip" data-node-id="${escHtml(item.id)}" title="${escHtml(
-                  item.description || item.label,
-                )}">
-                  ${escHtml(item.object_label || "object")} ${(Number(item.confidence || 0)).toFixed(2)}
-                </button>`,
-              )
-              .join("")
-          : '<span class="media-no-detections">No objects</span>';
+        const fileLabel = asset.label || asset.filepath || "Media file";
         return `
-          <article class="media-frame-card" data-node-id="${escHtml(frame.id)}">
-            <div class="media-frame-image-wrap">
-              <img class="media-frame-img" src="${mediaFrameUrl(frameId)}" alt="${escHtml(frame.label)}" loading="lazy" />
-              ${boxes}
+          <section class="media-asset-section" data-node-id="${escHtml(asset.id)}">
+            <div class="media-asset-head">
+              <div>
+                <div class="media-asset-kicker">Media File</div>
+                <div class="media-asset-title">${escHtml(fileLabel)}</div>
+              </div>
+              <div class="media-asset-metrics">
+                <span>${assetFrames.length} frames</span>
+                <span>${assetObjects.length} detections</span>
+              </div>
             </div>
-            <div class="media-frame-card-meta">
-              <span>${escHtml(frame.label)}</span>
-              <strong>${detections.length} detection${detections.length === 1 ? "" : "s"}</strong>
+            <div class="media-frame-grid">
+              ${frameCards || '<div class="timeline-empty">No frames were extracted for this media.</div>'}
             </div>
-            <div class="media-detection-list">${chips}</div>
-          </article>
+            ${renderMediaObjectGraph(assetObjects, assetEdges)}
+          </section>
         `;
       })
       .join("");
+
     const labelCounts = objects.reduce((acc, item) => {
       const label = String(item.object_label || "object");
       acc.set(label, (acc.get(label) || 0) + 1);
@@ -606,7 +659,7 @@
         <div class="media-review-summary">
           <div>
             <div class="media-review-kicker">Visual Evidence</div>
-            <div class="media-review-title">${escHtml(assets[0]?.label || data.case_ref || "Media review")}</div>
+            <div class="media-review-title">${escHtml(data.case_ref || assets[0]?.label || "Media review")}</div>
           </div>
           <div class="media-review-metrics">
             <span>${Number(data.meta?.frame_count || frames.length)} frames</span>
@@ -615,11 +668,19 @@
           </div>
         </div>
         <div class="media-summary-pills">${labelSummary || '<span class="media-summary-pill">No object detections</span>'}</div>
-        <div class="media-frame-grid">${frameCards || '<div class="timeline-empty">No frames were extracted for this media.</div>'}</div>
-        ${renderMediaObjectGraph(objects, edges)}
+        <div class="media-asset-stack">
+          ${assetSections || '<div class="timeline-empty">No media files found for this case.</div>'}
+        </div>
       </div>
     `;
     positionMediaBoxes(cyRoot);
+    cyRoot.querySelectorAll(".media-asset-head").forEach((head) => {
+      head.addEventListener("click", () => {
+        const section = head.closest(".media-asset-section");
+        const node = nodes.find((item) => item.id === section?.getAttribute("data-node-id"));
+        setMediaDetail(node, edges, nodes, null);
+      });
+    });
     cyRoot.querySelectorAll(".media-frame-card").forEach((card) => {
       card.addEventListener("click", () => {
         const node = nodes.find((item) => item.id === card.getAttribute("data-node-id"));
