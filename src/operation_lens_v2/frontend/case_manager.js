@@ -37,6 +37,27 @@ function describeUploadType(fileName) {
   if ([".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"].some((ext) => lower.endsWith(ext))) {
     return "image";
   }
+  if (
+    [
+      ".aac",
+      ".aiff",
+      ".avi",
+      ".flac",
+      ".m4a",
+      ".mkv",
+      ".mov",
+      ".mp3",
+      ".mp4",
+      ".mpeg",
+      ".mpg",
+      ".ogg",
+      ".wav",
+      ".webm",
+      ".wma",
+    ].some((ext) => lower.endsWith(ext))
+  ) {
+    return "media";
+  }
   return "PDF";
 }
 
@@ -245,7 +266,7 @@ if (caseUploadForm) {
       setInlineStatus(
         caseUploadStatus,
         "error",
-        "Select a PDF, image, CSV, TSV, or thread Parquet file to upload.",
+        "Select a PDF, image, media, CSV, TSV, or thread Parquet file to upload.",
       );
       return;
     }
@@ -288,7 +309,7 @@ if (caseUploadForm) {
             if (statusResp.ok) {
               const statusPayload = await statusResp.json();
               const st = statusPayload?.status || "";
-              if (["success", "failed", "ocr_failed", "skipped"].includes(st)) break;
+              if (["success", "failed", "ocr_failed", "skipped", "transcription_empty"].includes(st)) break;
             }
           } catch (_) {}
           await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -304,7 +325,7 @@ if (caseUploadForm) {
         data.ocr_failed ? "error" : "success",
         data.ocr_failed
           ? "OCR produced <20 chars — the document is probably a scan of a blank form or a non-Latin script. Try Tesseract with --lang in settings."
-          : `${data.filename || file.name} stored and ingested for ${caseRef}.`,
+          : `${data.filename || file.name} stored and ingested for ${caseRef}${Number.isFinite(Number(data.media_frames)) ? `; media frames ${data.media_frames}, detections ${data.media_detections || 0}` : ""}.`,
       );
     } catch (error) {
       setInlineStatus(caseUploadStatus, "error", String(error));

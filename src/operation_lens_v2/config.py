@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # Optional local transcription / handwritten OCR models. These are only
     # used when their heavy runtime packages are installed in the local env.
     whisper_model: str = Field(default="base", alias="WHISPER_MODEL")
+    ffmpeg_path: str = Field(default="", alias="FFMPEG_PATH")
+    media_object_detection_model: str = Field(
+        default="yolov8n.pt", alias="MEDIA_OBJECT_DETECTION_MODEL"
+    )
     trocr_model: str = Field(
         default="microsoft/trocr-base-handwritten", alias="TROCR_MODEL"
     )

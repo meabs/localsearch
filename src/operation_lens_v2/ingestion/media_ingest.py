@@ -20,6 +20,7 @@ from operation_lens_v2.ingestion import (
     vector_store,
 )
 from operation_lens_v2.ingestion.change_detection import fingerprint_path
+from operation_lens_v2.ingestion.media_objects import ensure_ffmpeg_on_path, extract_media_objects
 from operation_lens_v2.models import Chunk
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,13 @@ def _utc_now() -> datetime:
 
 def transcribe_media(media_path: Path, *, model_name: str | None = None) -> TranscriptionResult:
     """Transcribe audio/video with local Whisper when the optional package is installed."""
+    if ensure_ffmpeg_on_path() is None:
+        return TranscriptionResult(
+            text="",
+            method="whisper",
+            available=True,
+            error="ffmpeg executable not found; set FFMPEG_PATH or install ffmpeg",
+        )
     try:
         import whisper  # type: ignore[import]
     except ImportError:
@@ -129,6 +137,12 @@ async def ingest_media(
             source_size_bytes=fingerprint.size_bytes,
             source_mtime_ns=fingerprint.mtime_ns,
         )
+        media_graph = _extract_media_objects_safe(
+            con,
+            media_path=media_path,
+            doc_id=doc_id,
+            case_id=case_id,
+        )
         result = {
             "doc_id": doc_id,
             "case_ref": case_ref,
@@ -138,6 +152,9 @@ async def ingest_media(
             "format": "media",
             "transcribed": False,
             "transcription_error": transcription.error or "empty transcription",
+            "media_frames": int(media_graph.get("frames", 0)),
+            "media_detections": int(media_graph.get("detections", 0)),
+            "media_object_relationships": int(media_graph.get("object_relationships", 0)),
         }
         duration_ms = int((perf_counter() - started_perf) * 1000)
         duck_store.record_ingestion_event(
@@ -155,7 +172,14 @@ async def ingest_media(
             chunks=0,
             relationships_new=0,
             ocr_used=False,
-            notes=transcription.error or "empty transcription",
+            notes="; ".join(
+                part
+                for part in [
+                    transcription.error or "empty transcription",
+                    str(media_graph.get("notes") or ""),
+                ]
+                if part
+            ),
         )
         return result
 
@@ -171,6 +195,12 @@ async def ingest_media(
         source_hash=fingerprint.sha256,
         source_size_bytes=fingerprint.size_bytes,
         source_mtime_ns=fingerprint.mtime_ns,
+    )
+    media_graph = _extract_media_objects_safe(
+        con,
+        media_path=media_path,
+        doc_id=doc_id,
+        case_id=case_id,
     )
     page_text = f"[Transcript via {transcription.method}]\n{transcription.text}"
     chunks = chunker.chunk_pages(
@@ -205,6 +235,9 @@ async def ingest_media(
         "relationships": relationship_count,
         "format": "media",
         "transcribed": True,
+        "media_frames": int(media_graph.get("frames", 0)),
+        "media_detections": int(media_graph.get("detections", 0)),
+        "media_object_relationships": int(media_graph.get("object_relationships", 0)),
     }
     duration_ms = int((perf_counter() - started_perf) * 1000)
     duck_store.record_ingestion_event(
@@ -223,9 +256,36 @@ async def ingest_media(
         entities_new=duck_store.count_entities_first_seen_in(con, doc_id),
         relationships_new=relationship_count,
         ocr_used=False,
-        notes=f"transcription_method={transcription.method}; source_hash={fingerprint.sha256}",
+        notes="; ".join(
+            part
+            for part in [
+                f"transcription_method={transcription.method}",
+                f"source_hash={fingerprint.sha256}",
+                str(media_graph.get("notes") or ""),
+            ]
+            if part
+        ),
     )
     return result
+
+
+def _extract_media_objects_safe(
+    con,
+    *,
+    media_path: Path,
+    doc_id: str,
+    case_id: str,
+) -> dict[str, object]:
+    try:
+        return extract_media_objects(con, media_path=media_path, doc_id=doc_id, case_id=case_id)
+    except Exception as exc:
+        logger.warning("Media object extraction failed for %s: %s", media_path, exc)
+        return {
+            "frames": 0,
+            "detections": 0,
+            "object_relationships": 0,
+            "notes": f"media_object_error={type(exc).__name__}: {exc}",
+        }
 
 
 async def _extract_entities_relationships(con, chunk: Chunk, doc_id: str) -> int:

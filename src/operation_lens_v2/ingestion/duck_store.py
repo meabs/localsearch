@@ -164,6 +164,7 @@ def init_db(path: str) -> duckdb.DuckDBPyConnection:
     _ensure_attachments_table(con)
     _ensure_temporal_columns(con)
     _ensure_ingestion_events_table(con)
+    ensure_media_object_tables(con)
     _ensure_entity_review_columns(con)
     _ensure_alias_resolution_columns(con)
     _ensure_graph_indexes(con)
@@ -281,6 +282,77 @@ def _ensure_ingestion_events_table(con: duckdb.DuckDBPyConnection) -> None:
         );
         """
     )
+
+
+def ensure_media_object_tables(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS media_assets (
+          asset_id TEXT PRIMARY KEY,
+          doc_id TEXT REFERENCES documents(doc_id),
+          case_id TEXT REFERENCES cases(case_id),
+          filename TEXT NOT NULL,
+          filepath TEXT NOT NULL,
+          media_type TEXT NOT NULL,
+          duration_seconds DOUBLE,
+          created_at TIMESTAMP DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS media_frames (
+          frame_id TEXT PRIMARY KEY,
+          asset_id TEXT REFERENCES media_assets(asset_id),
+          doc_id TEXT REFERENCES documents(doc_id),
+          timestamp_seconds DOUBLE DEFAULT 0,
+          frame_index INTEGER DEFAULT 0,
+          image_path TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS media_detections (
+          detection_id TEXT PRIMARY KEY,
+          frame_id TEXT REFERENCES media_frames(frame_id),
+          asset_id TEXT REFERENCES media_assets(asset_id),
+          doc_id TEXT REFERENCES documents(doc_id),
+          label TEXT NOT NULL,
+          confidence FLOAT DEFAULT 0,
+          x1 DOUBLE,
+          y1 DOUBLE,
+          x2 DOUBLE,
+          y2 DOUBLE,
+          created_at TIMESTAMP DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS media_object_relationships (
+          rel_id TEXT PRIMARY KEY,
+          source_detection_id TEXT REFERENCES media_detections(detection_id),
+          target_detection_id TEXT REFERENCES media_detections(detection_id),
+          relation_type TEXT NOT NULL,
+          confidence FLOAT DEFAULT 0,
+          frame_id TEXT REFERENCES media_frames(frame_id),
+          asset_id TEXT REFERENCES media_assets(asset_id),
+          created_at TIMESTAMP DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS media_entity_links (
+          link_id TEXT PRIMARY KEY,
+          detection_id TEXT REFERENCES media_detections(detection_id),
+          entity_id TEXT REFERENCES entities(entity_id),
+          confidence FLOAT DEFAULT 0,
+          method TEXT,
+          created_at TIMESTAMP DEFAULT now()
+        );
+        """
+    )
+    for ddl in (
+        "CREATE INDEX IF NOT EXISTS media_assets_case_idx ON media_assets(case_id);",
+        "CREATE INDEX IF NOT EXISTS media_frames_asset_idx ON media_frames(asset_id);",
+        "CREATE INDEX IF NOT EXISTS media_detections_frame_idx ON media_detections(frame_id);",
+        (
+            "CREATE INDEX IF NOT EXISTS media_object_rel_asset_idx "
+            "ON media_object_relationships(asset_id);"
+        ),
+    ):
+        _try_ddl(con, ddl, context="media_object_index")
 
 
 def _ensure_entity_review_columns(con: duckdb.DuckDBPyConnection) -> None:
@@ -631,6 +703,277 @@ def list_page_quality(
         }
         for row in rows
     ]
+
+
+def upsert_media_asset(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    doc_id: str,
+    case_id: str,
+    filename: str,
+    filepath: str,
+    media_type: str,
+    duration_seconds: float | None = None,
+) -> str:
+    existing = con.execute(
+        "SELECT asset_id FROM media_assets WHERE doc_id = ?",
+        [doc_id],
+    ).fetchone()
+    asset_id = existing[0] if existing else str(uuid4())
+    con.execute(
+        """
+        INSERT OR REPLACE INTO media_assets (
+          asset_id, doc_id, case_id, filename, filepath, media_type, duration_seconds
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [asset_id, doc_id, case_id, filename, filepath, media_type, duration_seconds],
+    )
+    return asset_id
+
+
+def insert_media_frame(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    asset_id: str,
+    doc_id: str,
+    timestamp_seconds: float,
+    frame_index: int,
+    image_path: str,
+) -> str:
+    frame_id = str(uuid4())
+    con.execute(
+        """
+        INSERT INTO media_frames (
+          frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path],
+    )
+    return frame_id
+
+
+def insert_media_detection(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    frame_id: str,
+    asset_id: str,
+    doc_id: str,
+    label: str,
+    confidence: float,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+) -> str:
+    detection_id = str(uuid4())
+    con.execute(
+        """
+        INSERT INTO media_detections (
+          detection_id, frame_id, asset_id, doc_id, label, confidence, x1, y1, x2, y2
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [detection_id, frame_id, asset_id, doc_id, label, confidence, x1, y1, x2, y2],
+    )
+    return detection_id
+
+
+def insert_media_object_relationship(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    source_detection_id: str,
+    target_detection_id: str,
+    relation_type: str,
+    confidence: float,
+    frame_id: str,
+    asset_id: str,
+) -> str:
+    rel_id = str(uuid4())
+    con.execute(
+        """
+        INSERT INTO media_object_relationships (
+          rel_id, source_detection_id, target_detection_id, relation_type,
+          confidence, frame_id, asset_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            rel_id,
+            source_detection_id,
+            target_detection_id,
+            relation_type,
+            confidence,
+            frame_id,
+            asset_id,
+        ],
+    )
+    return rel_id
+
+
+def list_media_object_graph(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    case_ref: str | None = None,
+    limit: int = 500,
+) -> dict[str, object]:
+    params: list[object] = []
+    case_join = ""
+    case_where = ""
+    if case_ref:
+        case_join = "JOIN cases c ON c.case_id = ma.case_id"
+        case_where = "WHERE lower(c.case_ref) = lower(?)"
+        params.append(case_ref)
+
+    assets = con.execute(
+        f"""
+        SELECT ma.asset_id, ma.doc_id, ma.filename, ma.filepath, ma.media_type
+        FROM media_assets ma
+        {case_join}
+        {case_where}
+        ORDER BY ma.created_at DESC, ma.filename
+        LIMIT ?
+        """,
+        [*params, max(1, limit)],
+    ).fetchall()
+    if not assets:
+        return {
+            "graph_type": "media_object",
+            "case_ref": case_ref,
+            "nodes": [],
+            "edges": [],
+            "meta": {"asset_count": 0, "frame_count": 0, "detection_count": 0, "edge_count": 0},
+        }
+
+    asset_ids = [row[0] for row in assets]
+    placeholders = ",".join(["?"] * len(asset_ids))
+    frames = con.execute(
+        f"""
+        SELECT frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path
+        FROM media_frames
+        WHERE asset_id IN ({placeholders})
+        ORDER BY asset_id, frame_index
+        """,
+        asset_ids,
+    ).fetchall()
+    detections = con.execute(
+        f"""
+        SELECT detection_id, frame_id, asset_id, doc_id, label, confidence, x1, y1, x2, y2
+        FROM media_detections
+        WHERE asset_id IN ({placeholders})
+        ORDER BY asset_id, frame_id, confidence DESC
+        LIMIT ?
+        """,
+        [*asset_ids, max(1, limit)],
+    ).fetchall()
+    rels = con.execute(
+        f"""
+        SELECT rel_id, source_detection_id, target_detection_id, relation_type,
+               confidence, frame_id, asset_id
+        FROM media_object_relationships
+        WHERE asset_id IN ({placeholders})
+        ORDER BY confidence DESC
+        LIMIT ?
+        """,
+        [*asset_ids, max(1, limit)],
+    ).fetchall()
+
+    nodes: list[dict[str, object]] = []
+    edges: list[dict[str, object]] = []
+    for asset_id, doc_id, filename, filepath, media_type in assets:
+        nodes.append(
+            {
+                "id": f"asset:{asset_id}",
+                "label": filename,
+                "entity_type": "MEDIA_ASSET",
+                "media_type": media_type,
+                "doc_id": doc_id,
+                "filepath": filepath,
+                "mention_count": 5,
+            }
+        )
+    for frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path in frames:
+        label = f"frame {int(frame_index) + 1}"
+        if timestamp_seconds is not None:
+            label = f"{label} @ {float(timestamp_seconds):.1f}s"
+        nodes.append(
+            {
+                "id": f"frame:{frame_id}",
+                "label": label,
+                "entity_type": "MEDIA_FRAME",
+                "asset_id": asset_id,
+                "doc_id": doc_id,
+                "timestamp_seconds": float(timestamp_seconds or 0),
+                "frame_index": int(frame_index or 0),
+                "image_path": image_path,
+                "mention_count": 3,
+            }
+        )
+        edges.append(
+            {
+                "id": f"asset-frame:{asset_id}:{frame_id}",
+                "source": f"asset:{asset_id}",
+                "target": f"frame:{frame_id}",
+                "type": "HAS_FRAME",
+                "confidence": 1.0,
+                "evidence_count": 1,
+                "distinct_doc_count": 1,
+            }
+        )
+    for row in detections:
+        detection_id, frame_id, asset_id, doc_id, label, confidence, x1, y1, x2, y2 = row
+        nodes.append(
+            {
+                "id": f"object:{detection_id}",
+                "label": f"{label} {float(confidence or 0):.2f}",
+                "entity_type": "MEDIA_OBJECT",
+                "object_label": label,
+                "asset_id": asset_id,
+                "doc_id": doc_id,
+                "frame_id": frame_id,
+                "confidence": float(confidence or 0),
+                "bbox": [float(x1 or 0), float(y1 or 0), float(x2 or 0), float(y2 or 0)],
+                "mention_count": 2,
+            }
+        )
+        edges.append(
+            {
+                "id": f"frame-object:{frame_id}:{detection_id}",
+                "source": f"frame:{frame_id}",
+                "target": f"object:{detection_id}",
+                "type": "HAS_DETECTION",
+                "confidence": float(confidence or 0),
+                "evidence_count": 1,
+                "distinct_doc_count": 1,
+            }
+        )
+    for rel_id, source_id, target_id, rel_type, confidence, frame_id, asset_id in rels:
+        edges.append(
+            {
+                "id": rel_id,
+                "source": f"object:{source_id}",
+                "target": f"object:{target_id}",
+                "type": rel_type,
+                "confidence": float(confidence or 0),
+                "frame_id": frame_id,
+                "asset_id": asset_id,
+                "evidence_count": 1,
+                "distinct_doc_count": 1,
+            }
+        )
+    return {
+        "graph_type": "media_object",
+        "case_ref": case_ref,
+        "nodes": nodes,
+        "edges": edges,
+        "meta": {
+            "asset_count": len(assets),
+            "frame_count": len(frames),
+            "detection_count": len(detections),
+            "edge_count": len(edges),
+        },
+    }
 
 
 def insert_chunks(con: duckdb.DuckDBPyConnection, chunks: list[Chunk]) -> None:

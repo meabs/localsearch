@@ -343,7 +343,7 @@ def network(
         ).fetchall()
     else:
         edge_rows = con.execute(
-            """
+            f"""
             WITH latest_attachments AS (
               SELECT entity_id, attachment_id
               FROM (
@@ -383,7 +383,7 @@ def network(
             LEFT JOIN latest_attachments la_src ON la_src.entity_id = es.entity_id
             LEFT JOIN latest_attachments la_tgt ON la_tgt.entity_id = et.entity_id
             WHERE 1 = 1
-              {case_filter}
+              {case_filter_sql}
             GROUP BY
               r.rel_id, r.source_entity, r.target_entity, r.relation_type, r.confidence,
               es.canonical_name, et.canonical_name, es.entity_type, et.entity_type,
@@ -391,7 +391,7 @@ def network(
               es.latitude, es.longitude, et.latitude, et.longitude
             ORDER BY r.confidence DESC
             LIMIT ?
-            """.format(case_filter=case_filter_sql),
+            """,
             [
                 *([case_id] if case_id else []),
                 max(limit, 1),
@@ -453,6 +453,14 @@ def network(
             "entity_found": bool(focus_node_ids) if entity else True,
         },
     }
+
+
+@router.get("/media-network")
+def media_network(case_ref: str | None = None, limit: int = 500) -> dict[str, object]:
+    """Return the separate media-object graph: assets, frames, detections and spatial links."""
+    con = get_duck_connection(settings.duckdb_path)
+    duck_store.ensure_media_object_tables(con)
+    return duck_store.list_media_object_graph(con, case_ref=case_ref, limit=limit)
 
 
 @router.get("/locations")

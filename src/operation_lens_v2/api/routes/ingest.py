@@ -5,9 +5,10 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from operation_lens_v2.api.schemas import EmailThreadIngestRequest, IngestRequest
 from operation_lens_v2.config import settings
-from operation_lens_v2.ingestion.email_threads import ingest_email_thread_parquet
 from operation_lens_v2.ingestion import duck_store
+from operation_lens_v2.ingestion.email_threads import ingest_email_thread_parquet
 from operation_lens_v2.ingestion.image_ingest import ingest_image
+from operation_lens_v2.ingestion.media_ingest import AUDIO_VIDEO_SUFFIXES, ingest_media
 from operation_lens_v2.ingestion.pipeline import ingest_corpus, ingest_pdf, ingest_tabular
 from operation_lens_v2.runtime import reset_duck_connection
 
@@ -16,6 +17,15 @@ UPLOAD_FILE_PARAM = File(...)
 CASE_REF_FORM = Form(...)
 CASE_NAME_FORM = Form(default=None)
 FORCE_FORM = Form(default=False)
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+UPLOAD_SUFFIXES = {
+    ".pdf",
+    ".parquet",
+    ".csv",
+    ".tsv",
+    *IMAGE_SUFFIXES,
+    *AUDIO_VIDEO_SUFFIXES,
+}
 
 
 def _sanitise_case_ref(case_ref: str) -> str:
@@ -26,7 +36,7 @@ def _sanitise_case_ref(case_ref: str) -> str:
 def _build_upload_path(case_ref: str, original_name: str) -> Path:
     raw_filename = Path(original_name or "upload.pdf").name
     suffix = Path(raw_filename).suffix.lower()
-    if suffix not in {".pdf", ".parquet", ".csv", ".tsv", ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
+    if suffix not in UPLOAD_SUFFIXES:
         suffix = ".pdf"
     filename = f"{Path(raw_filename).stem or 'upload'}{suffix}"
 
@@ -46,7 +56,7 @@ async def ingest_file_endpoint(payload: IngestRequest) -> dict[str, object]:
     """Ingest a single supported file into the evidence store."""
     pdf_path = Path(payload.pdf_path)
     if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail=f"PDF file not found: {payload.pdf_path}")
+        raise HTTPException(status_code=404, detail=f"Evidence file not found: {payload.pdf_path}")
     lower_suffix = pdf_path.suffix.lower()
     if lower_suffix in {".csv", ".tsv"}:
         result = await ingest_tabular(
@@ -54,8 +64,14 @@ async def ingest_file_endpoint(payload: IngestRequest) -> dict[str, object]:
             case_ref=payload.case_ref,
             case_name=payload.case_name,
         )
-    elif lower_suffix in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
+    elif lower_suffix in IMAGE_SUFFIXES:
         result = await ingest_image(
+            pdf_path,
+            case_ref=payload.case_ref,
+            case_name=payload.case_name,
+        )
+    elif lower_suffix in AUDIO_VIDEO_SUFFIXES:
+        result = await ingest_media(
             pdf_path,
             case_ref=payload.case_ref,
             case_name=payload.case_name,
@@ -88,7 +104,9 @@ async def ingest_corpus_endpoint(payload: IngestRequest) -> dict[str, object]:
 
 
 @router.post("/email-threads/file")
-async def ingest_email_threads_file_endpoint(payload: EmailThreadIngestRequest) -> dict[str, object]:
+async def ingest_email_threads_file_endpoint(
+    payload: EmailThreadIngestRequest,
+) -> dict[str, object]:
     """Ingest a parquet file containing email threads into the graph store."""
     parquet_path = Path(payload.parquet_path)
     if not parquet_path.exists():
@@ -121,17 +139,17 @@ async def ingest_upload_endpoint(
     case_name: str | None = CASE_NAME_FORM,
     force: bool = FORCE_FORM,
 ) -> dict[str, object]:
-    """Accept a PDF or Parquet upload directly from the browser and ingest it."""
+    """Accept a supported evidence upload directly from the browser and ingest it."""
     resolved_case_ref = case_ref.strip()
     if not resolved_case_ref:
         raise HTTPException(status_code=400, detail="case_ref is required")
 
     filename = Path(file.filename or "").name
     suffix = Path(filename).suffix.lower()
-    if suffix not in {".pdf", ".parquet", ".csv", ".tsv", ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
+    if suffix not in UPLOAD_SUFFIXES:
         raise HTTPException(
             status_code=400,
-            detail="Only PDF, image, CSV, TSV and Parquet uploads are supported",
+            detail="Only PDF, image, audio/video, CSV, TSV and Parquet uploads are supported",
         )
 
     destination = _build_upload_path(resolved_case_ref, filename)
@@ -155,8 +173,14 @@ async def ingest_upload_endpoint(
             case_ref=resolved_case_ref,
             case_name=case_name,
         )
-    elif suffix in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
+    elif suffix in IMAGE_SUFFIXES:
         result = await ingest_image(
+            destination,
+            case_ref=resolved_case_ref,
+            case_name=case_name,
+        )
+    elif suffix in AUDIO_VIDEO_SUFFIXES:
+        result = await ingest_media(
             destination,
             case_ref=resolved_case_ref,
             case_name=case_name,

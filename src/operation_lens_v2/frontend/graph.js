@@ -14,6 +14,7 @@
   const cyRoot = document.getElementById("cy");
   const detail = document.getElementById("node-detail");
   const form = document.getElementById("graph-form");
+  const graphModeSelect = document.getElementById("graph-mode-select");
   const input = document.getElementById("graph-entity-input");
   const caseSelect = document.getElementById("graph-case-select");
   const layoutSelect = document.getElementById("graph-layout-select");
@@ -21,6 +22,12 @@
   const crossDocToggle = document.getElementById("graph-cross-doc-toggle");
   const relayoutBtn = document.getElementById("graph-relayout-btn");
   const fitBtn = document.getElementById("graph-fit-btn");
+  const graphPanelOverline = document.getElementById("graph-panel-overline");
+  const graphPanelTitle = document.getElementById("graph-panel-title");
+  const graphPanelCopy = document.getElementById("graph-panel-copy");
+  const graphPanelChip = document.getElementById("graph-panel-chip");
+  const graphSubmitBtn = document.getElementById("graph-submit-btn");
+  const graphCanvasStatus = document.getElementById("graph-canvas-status");
   if (!cyRoot || !detail) return;
 
   let cy = null;
@@ -34,6 +41,7 @@
   const layoutStore = window.LensGraphLayout;
   const savedLayout = layoutStore?.load?.() || {};
   const graphView = {
+    mode: savedLayout.mode || "entity",
     layout: savedLayout.layout || "fcose",
     confidence: Number(savedLayout.confidence ?? 0.35),
     crossDoc: savedLayout.crossDoc ?? true,
@@ -65,6 +73,9 @@
 
   function colorFor(entityType) {
     const key = String(entityType || "UNKNOWN").toUpperCase();
+    if (key === "MEDIA_ASSET") return "#d58b24";
+    if (key === "MEDIA_FRAME") return "#8394a7";
+    if (key === "MEDIA_OBJECT") return "#4db6c8";
     if (schemaColors[key]) return schemaColors[key];
     if (colorCache[key]) return colorCache[key];
     if (key === "UNKNOWN") return FALLBACK_COLOR;
@@ -360,7 +371,46 @@
       });
   }
 
+  function setMediaDetail(node, edges, nodes, edge = null) {
+    if (!node && !edge) {
+      detail.innerHTML =
+        '<div class="node-empty">Select a media asset, frame, object, or relationship to inspect the visual evidence graph.</div>';
+      return;
+    }
+    if (edge) {
+      const source = nodes.find((n) => n.id === edge.source);
+      const target = nodes.find((n) => n.id === edge.target);
+      detail.innerHTML = `
+        <div class="node-detail-header">Media Relationship</div>
+        <div class="detail-field"><span class="detail-key">SOURCE</span><span class="detail-val">${escHtml(source?.label || edge.source)}</span></div>
+        <div class="detail-field"><span class="detail-key">TARGET</span><span class="detail-val">${escHtml(target?.label || edge.target)}</span></div>
+        <div class="detail-field"><span class="detail-key">TYPE</span><span class="detail-val">${escHtml(edge.type || "UNKNOWN")}</span></div>
+        <div class="detail-field"><span class="detail-key">CONFIDENCE</span><span class="detail-val">${(edge.confidence || 0).toFixed(2)}</span></div>
+      `;
+      return;
+    }
+    const linked = edges.filter((e) => e.source === node.id || e.target === node.id);
+    const bbox = Array.isArray(node.bbox) ? node.bbox.map((v) => Number(v).toFixed(1)).join(", ") : "";
+    detail.innerHTML = `
+      <div class="node-detail-header">${escHtml(node.label)}</div>
+      <div class="detail-field"><span class="detail-key">TYPE</span><span class="detail-val">${escHtml(node.entity_type || "UNKNOWN")}</span></div>
+      ${node.media_type ? `<div class="detail-field"><span class="detail-key">MEDIA</span><span class="detail-val">${escHtml(node.media_type)}</span></div>` : ""}
+      ${node.object_label ? `<div class="detail-field"><span class="detail-key">OBJECT</span><span class="detail-val">${escHtml(node.object_label)}</span></div>` : ""}
+      ${node.confidence !== undefined ? `<div class="detail-field"><span class="detail-key">CONFIDENCE</span><span class="detail-val">${Number(node.confidence || 0).toFixed(2)}</span></div>` : ""}
+      ${node.timestamp_seconds !== undefined ? `<div class="detail-field"><span class="detail-key">TIME</span><span class="detail-val">${Number(node.timestamp_seconds || 0).toFixed(1)}s</span></div>` : ""}
+      ${bbox ? `<div class="detail-field"><span class="detail-key">BBOX</span><span class="detail-val">${escHtml(bbox)}</span></div>` : ""}
+      ${node.filepath ? `<div class="detail-field"><span class="detail-key">FILE</span><span class="detail-val">${escHtml(node.filepath)}</span></div>` : ""}
+      ${node.image_path ? `<div class="detail-field"><span class="detail-key">FRAME</span><span class="detail-val">${escHtml(node.image_path)}</span></div>` : ""}
+      <div class="detail-field"><span class="detail-key">LINKS</span><span class="detail-val">${linked.length}</span></div>
+      <div class="node-empty" style="margin-top:12px;">This graph is separate from transcript entities. It links media assets to sampled frames and detected objects.</div>
+    `;
+  }
+
   function setDetail(node, edges, nodes, edge = null) {
+    if (graphView.mode === "media") {
+      setMediaDetail(node, edges, nodes, edge);
+      return;
+    }
     if (!node && !edge) {
       detail.innerHTML =
         '<div class="node-empty">Select a node or edge to view entity details and exact supporting evidence.</div>';
@@ -481,8 +531,34 @@
     caseSelect.value = current;
   }
 
+  function updateGraphModeUi() {
+    const isMedia = graphView.mode === "media";
+    if (graphModeSelect) graphModeSelect.value = graphView.mode;
+    if (input) {
+      input.disabled = isMedia;
+      input.placeholder = isMedia ? "Media graph uses the selected operation" : "e.g. Marcus Webb";
+      if (isMedia) input.value = "";
+    }
+    if (graphPanelOverline) graphPanelOverline.textContent = isMedia ? "Media objects" : "Entity seed";
+    if (graphPanelTitle) graphPanelTitle.textContent = isMedia ? "Inspect media graph" : "Expand a network";
+    if (graphPanelCopy) {
+      graphPanelCopy.textContent = isMedia
+        ? "Load visual objects, frames, and spatial links from uploaded media."
+        : "Use a person, alias, location, or asset to build an operational map around it.";
+    }
+    if (graphPanelChip) graphPanelChip.textContent = isMedia ? "Object graph" : "Atlas query";
+    if (graphSubmitBtn) graphSubmitBtn.textContent = isMedia ? "Load media graph" : "Expand network";
+    if (graphCanvasStatus) {
+      graphCanvasStatus.textContent = isMedia
+        ? "Media assets, sampled frames and detected object links"
+        : "Weighted by mentions and confidence";
+    }
+    if (crossDocToggle) crossDocToggle.disabled = isMedia;
+  }
+
   function persistGraphView() {
     layoutStore?.save?.({
+      mode: graphView.mode,
       layout: graphView.layout,
       confidence: graphView.confidence,
       crossDoc: graphView.crossDoc,
@@ -514,16 +590,17 @@
   async function loadNetwork(entityName = "") {
     const params = new URLSearchParams();
     params.set("limit", "140");
-    if (entityName) {
+    if (graphView.mode !== "media" && entityName) {
       params.set("entity", entityName);
       params.set("hops", "2");
     }
     const caseRef = activeCaseRef();
     if (caseRef) params.set("case_ref", caseRef);
-    const resp = await fetch(apiUrl(`/graph/network?${params.toString()}`));
+    const endpoint = graphView.mode === "media" ? "/graph/media-network" : "/graph/network";
+    const resp = await fetch(apiUrl(`${endpoint}?${params.toString()}`));
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    if (entityName && data.meta && data.meta.entity_found === false) {
+    if (graphView.mode !== "media" && entityName && data.meta && data.meta.entity_found === false) {
       if (cy) cy.destroy();
       cyRoot.innerHTML =
         '<div class="timeline-empty">No exact graph match was found for that entity.</div>';
@@ -535,7 +612,7 @@
       const conf = Number(edge.confidence || 0);
       const isCrossDoc = Number(edge.distinct_doc_count || 0) > 1;
       if (conf < graphView.confidence) return false;
-      if (!graphView.crossDoc && isCrossDoc) return false;
+      if (graphView.mode !== "media" && !graphView.crossDoc && isCrossDoc) return false;
       return true;
     });
     // Collapse duplicate edges between the same pair/type to reduce visual mesh.
@@ -569,6 +646,12 @@
     });
     const edges = Array.from(collapsedByKey.values());
     if (cy) cy.destroy();
+    if (!nodes.length && graphView.mode === "media") {
+      cyRoot.innerHTML =
+        '<div class="timeline-empty">No media-object graph exists for this operation yet. Upload an image/video and ingest it first.</div>';
+      setDetail(null, [], []);
+      return;
+    }
     if (!window.cytoscape) {
       cyRoot.innerHTML =
         '<div class="timeline-empty">Graph library failed to load (Cytoscape CDN unavailable).</div>';
@@ -579,10 +662,15 @@
       elements: [
         ...nodes.map((n) => ({
           data: {
+            ...n,
             id: n.id,
             label: n.label,
             short_label: String(n.label || "").slice(0, 28),
             entity_type: n.entity_type || "UNKNOWN",
+            color_type:
+              graphView.mode === "media" && n.entity_type === "MEDIA_OBJECT"
+                ? `OBJECT_${n.object_label || "unknown"}`
+                : n.entity_type || "UNKNOWN",
             mention_count: Number(n.mention_count || 0),
             attachment_id: n.attachment_id || "",
             attachment_url: n.attachment_id
@@ -619,7 +707,7 @@
             "text-margin-y": 10,
             width: (ele) => Math.max(16, Math.min(34, 14 + Math.log2((ele.data("mention_count") || 1) + 1) * 4)),
             height: (ele) => Math.max(16, Math.min(34, 14 + Math.log2((ele.data("mention_count") || 1) + 1) * 4)),
-            "background-color": (ele) => colorFor(ele.data("entity_type")),
+            "background-color": (ele) => colorFor(ele.data("color_type") || ele.data("entity_type")),
             "background-image": (ele) => (ele.data("attachment_url") ? ele.data("attachment_url") : "none"),
             "background-fit": "cover",
             "background-width": "100%",
@@ -724,7 +812,7 @@
       cy.elements().not(neighborhood).addClass("dimmed");
       setDetail(node, edges, nodes, null);
       const queryInput = document.getElementById("query-input");
-      if (queryInput && node?.label) queryInput.value = node.label;
+      if (graphView.mode !== "media" && queryInput && node?.label) queryInput.value = node.label;
     });
     cy.on("tap", "edge", (evt) => {
       const id = evt.target.id();
@@ -750,6 +838,17 @@
       graphView.layout = layoutSelect.value || "fcose";
       persistGraphView();
       applyLayout();
+    });
+  }
+  if (graphModeSelect) {
+    graphModeSelect.value = graphView.mode;
+    graphModeSelect.addEventListener("change", () => {
+      graphView.mode = graphModeSelect.value === "media" ? "media" : "entity";
+      updateGraphModeUi();
+      persistGraphView();
+      loadNetwork((input?.value || "").trim()).catch((error) => {
+        cyRoot.innerHTML = `<div class="timeline-empty">Graph load failed: ${String(error)}</div>`;
+      });
     });
   }
   if (confidenceSlider) {
@@ -864,6 +963,7 @@
   });
 
   loadSchemaColors().finally(() => {
+    updateGraphModeUi();
     // Kick off the case picker population in parallel with the first render
     // so the operator sees the full list of ingested operations as soon as
     // possible. The initial loadNetwork() call uses whatever case is

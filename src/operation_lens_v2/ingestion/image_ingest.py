@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
@@ -22,7 +23,10 @@ from operation_lens_v2.ingestion import (
     vector_store,
 )
 from operation_lens_v2.ingestion.change_detection import fingerprint_path
+from operation_lens_v2.ingestion.media_objects import extract_media_objects
 from operation_lens_v2.models import Chunk
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -50,7 +54,7 @@ async def ingest_image(
     case_id = duck_store.create_case(con, case_ref=case_ref, case_name=resolved_case_name)
     doc_id = str(uuid4())
     event_id = str(uuid4())
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
 
     with Image.open(image_path) as img:
         image_copy = img.copy()
@@ -109,6 +113,12 @@ async def ingest_image(
         redaction_count=0,
         evidence_gap=ocr_failed,
         notes="image OCR below minimum text threshold" if ocr_failed else "",
+    )
+    media_graph = _extract_media_objects_safe(
+        con,
+        image_path=image_path,
+        doc_id=doc_id,
+        case_id=case_id,
     )
     duck_store.insert_chunks(con, [chunk])
 
@@ -200,13 +210,14 @@ async def ingest_image(
         source_type="image",
         status="ocr_failed" if ocr_failed else "success",
         started_at=started_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
         duration_ms=0,
         pages=1,
         chunks=1,
         entities_new=duck_store.count_entities_first_seen_in(con, doc_id),
         relationships_new=duck_store.count_relationships_evidenced_in(con, doc_id),
         ocr_used=True,
+        notes=str(media_graph.get("notes") or ""),
     )
 
     return {
@@ -218,4 +229,26 @@ async def ingest_image(
         "ocr_failed": ocr_failed,
         "event_id": event_id,
         "format": "image",
+        "media_frames": int(media_graph.get("frames", 0)),
+        "media_detections": int(media_graph.get("detections", 0)),
+        "media_object_relationships": int(media_graph.get("object_relationships", 0)),
     }
+
+
+def _extract_media_objects_safe(
+    con,
+    *,
+    image_path: Path,
+    doc_id: str,
+    case_id: str,
+) -> dict[str, object]:
+    try:
+        return extract_media_objects(con, media_path=image_path, doc_id=doc_id, case_id=case_id)
+    except Exception as exc:
+        logger.warning("Image object extraction failed for %s: %s", image_path, exc)
+        return {
+            "frames": 0,
+            "detections": 0,
+            "object_relationships": 0,
+            "notes": f"media_object_error={type(exc).__name__}: {exc}",
+        }

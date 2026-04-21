@@ -95,14 +95,21 @@
                   <div class="card-pad">
                     <div class="panel-titlebar">
                       <div>
-                        <div class="panel-overline">Entity seed</div>
-                        <div class="panel-title">Expand a network</div>
-                        <p class="panel-copy">Use a person, alias, location, or asset to build an operational map around it.</p>
+                        <div id="graph-panel-overline" class="panel-overline">Entity seed</div>
+                        <div id="graph-panel-title" class="panel-title">Expand a network</div>
+                        <p id="graph-panel-copy" class="panel-copy">Use a person, alias, location, or asset to build an operational map around it.</p>
                       </div>
-                      <div class="panel-chip">Atlas query</div>
+                      <div id="graph-panel-chip" class="panel-chip">Atlas query</div>
                     </div>
 
                     <form id="graph-form">
+                      <div class="field-group">
+                        <label class="field-label" for="graph-mode-select">Graph type</label>
+                        <select id="graph-mode-select">
+                          <option value="entity">Entity relationship graph</option>
+                          <option value="media">Media object graph</option>
+                        </select>
+                      </div>
                       <div class="field-group">
                         <label class="field-label" for="graph-case-select">Operation</label>
                         <select id="graph-case-select">
@@ -113,7 +120,7 @@
                         <label class="field-label" for="graph-entity-input">Subject query</label>
                         <input type="text" id="graph-entity-input" placeholder="e.g. Marcus Webb" />
                       </div>
-                      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
+                      <button id="graph-submit-btn" type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
                         Expand network
                       </button>
                     </form>
@@ -141,7 +148,7 @@
                 <div class="canvas-frame">
                   <div class="canvas-header">
                     <div class="canvas-title">Network projection</div>
-                    <div class="canvas-status">Weighted by mentions and confidence</div>
+                    <div id="graph-canvas-status" class="canvas-status">Weighted by mentions and confidence</div>
                   </div>
                   <div id="graph-layout-toolbar">
                     <label>Layout
@@ -606,14 +613,14 @@
                       <div>
                         <div class="panel-overline">Evidence intake</div>
                         <div class="panel-title">Upload case documents</div>
-                        <p class="panel-copy">Choose a case, then upload either a PDF or an email-thread Parquet file for local ingestion.</p>
+                        <p class="panel-copy">Choose a case, then upload documents, images, tables, email exports, or media files for local ingestion.</p>
                       </div>
-                      <div class="panel-chip">PDF + Parquet</div>
+                      <div class="panel-chip">Evidence</div>
                     </div>
 
                     <form id="case-upload-form">
                       <div id="case-upload-dropzone" class="entity-attach-dropzone" style="margin-bottom:12px;">
-                        <span>Drop files here: PDF, image (PNG/JPG/TIFF), CSV, email (.eml/.msg), email-thread Parquet.</span>
+                        <span>Drop files here: PDF, image, audio/video, CSV, email (.eml/.msg), email-thread Parquet.</span>
                       </div>
                       <div class="field-group">
                         <label class="field-label" for="case-upload-select">Target case</label>
@@ -621,13 +628,13 @@
                       </div>
                       <div class="field-group">
                         <label class="field-label" for="case-upload-file">Document</label>
-                        <input type="file" id="case-upload-file" accept="application/pdf,.pdf,image/png,.png,image/jpeg,.jpg,.jpeg,image/bmp,.bmp,image/tiff,.tif,.tiff,text/csv,.csv,text/tab-separated-values,.tsv,application/octet-stream,.parquet" />
+                        <input type="file" id="case-upload-file" accept="application/pdf,.pdf,image/png,.png,image/jpeg,.jpg,.jpeg,image/bmp,.bmp,image/tiff,.tif,.tiff,audio/aac,.aac,audio/aiff,.aiff,audio/flac,.flac,audio/m4a,.m4a,audio/mpeg,.mp3,audio/ogg,.ogg,audio/wav,.wav,audio/x-ms-wma,.wma,video/avi,.avi,video/mp4,.mp4,video/mpeg,.mpeg,.mpg,video/quicktime,.mov,video/webm,.webm,video/x-matroska,.mkv,text/csv,.csv,text/tab-separated-values,.tsv,application/octet-stream,.parquet" />
                       </div>
                       <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
                         Upload and ingest
                       </button>
                     </form>
-                    <div id="case-upload-status" class="inline-status inline-status-muted">Choose a case and a PDF or Parquet file to begin.</div>
+                    <div id="case-upload-status" class="inline-status inline-status-muted">Choose a case and an evidence file to begin.</div>
                   </div>
                 </div>
               </div>
