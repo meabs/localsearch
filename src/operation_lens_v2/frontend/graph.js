@@ -388,7 +388,7 @@
     const bbox = Array.isArray(node?.bbox) ? escHtml(JSON.stringify(node.bbox)) : "";
     return `
       <div class="media-frame-image-wrap ${compact ? "compact" : ""}">
-        <img class="media-frame-img" src="${mediaFrameUrl(frameId)}" alt="${escHtml(node.label || "media frame")}" loading="lazy" />
+        <img class="media-frame-img" src="${mediaFrameUrl(frameId)}" alt="${escHtml(node.label || "media frame")}" loading="eager" decoding="async" />
         ${
           bbox
             ? `<span class="media-bbox active" data-bbox="${bbox}" title="${escHtml(node.label || "detection")}"></span>`
@@ -403,9 +403,18 @@
       const img = wrap.querySelector(".media-frame-img");
       if (!img) return;
       img.addEventListener("error", () => {
+        if (!img.dataset.retryAttempted) {
+          img.dataset.retryAttempted = "1";
+          window.setTimeout(() => {
+            const separator = img.src.includes("?") ? "&" : "?";
+            img.src = `${img.src}${separator}retry=${Date.now()}`;
+          }, 250);
+          return;
+        }
         wrap.classList.add("frame-error");
       });
       const update = () => {
+        wrap.classList.remove("frame-error");
         const width = img.naturalWidth || 1;
         const height = img.naturalHeight || 1;
         wrap.querySelectorAll(".media-bbox[data-bbox]").forEach((box) => {
@@ -470,6 +479,16 @@
       )
       .join("");
 
+    const graphLabels = Array.from(labelCounts.keys()).sort((a, b) => a.localeCompare(b));
+    const graphWidth = Math.max(360, graphLabels.length * 180);
+    const graphHeight = 150;
+    const graphNodePositions = new Map();
+    graphLabels.forEach((label, index) => {
+      const x = graphLabels.length === 1 ? graphWidth / 2 : 72 + index * ((graphWidth - 144) / (graphLabels.length - 1));
+      const y = graphHeight / 2 + (index % 2 === 0 ? -12 : 12);
+      graphNodePositions.set(label, { x, y });
+    });
+
     const cooccurrence = new Map();
     frameGroups.forEach((items) => {
       const labels = Array.from(new Set(items.map((item) => String(item.object_label || "object")))).sort();
@@ -498,11 +517,26 @@
       })
       .filter(Boolean);
 
+    const networkEdges = [];
+    (edges || [])
+      .filter((edge) => !["HAS_FRAME", "HAS_DETECTION"].includes(edge.type))
+      .forEach((edge) => {
+        const source = objectById.get(edge.source);
+        const target = objectById.get(edge.target);
+        if (!source || !target) return;
+        networkEdges.push({
+          left: String(source.object_label || source.label || "object"),
+          right: String(target.object_label || target.label || "object"),
+          label: String(edge.type || "LINKED"),
+        });
+      });
+
     const cooccurrenceEdges = Array.from(cooccurrence.entries())
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 12)
       .map(([key, count]) => {
         const [left, right] = key.split("||");
+        networkEdges.push({ left, right, label: `same frame ${count}` });
         return `
           <div class="media-object-edge">
             <span>${escHtml(left)}</span>
@@ -513,6 +547,44 @@
         `;
       });
 
+    const networkLines = networkEdges
+      .slice(0, 10)
+      .map((edge) => {
+        const left = graphNodePositions.get(edge.left);
+        const right = graphNodePositions.get(edge.right);
+        if (!left || !right || edge.left === edge.right) return "";
+        const midX = (left.x + right.x) / 2;
+        const midY = (left.y + right.y) / 2 - 14;
+        return `
+          <g class="media-network-edge">
+            <line x1="${left.x}" y1="${left.y}" x2="${right.x}" y2="${right.y}"></line>
+            <text x="${midX}" y="${midY}">${escHtml(edge.label)}</text>
+          </g>
+        `;
+      })
+      .filter(Boolean)
+      .join("");
+    const networkNodes = graphLabels
+      .map((label) => {
+        const position = graphNodePositions.get(label);
+        const count = labelCounts.get(label) || 0;
+        return `
+          <g class="media-network-node" transform="translate(${position.x}, ${position.y})">
+            <circle r="${Math.min(34, 22 + count * 3)}"></circle>
+            <text y="-2">${escHtml(label)}</text>
+            <text y="14" class="count">${count}</text>
+          </g>
+        `;
+      })
+      .join("");
+    const networkHtml = `
+      <div class="media-object-network" aria-label="Detected object relationship graph">
+        <svg viewBox="0 0 ${graphWidth} ${graphHeight}" role="img">
+          ${networkLines}
+          ${networkNodes}
+        </svg>
+      </div>
+    `;
     const edgesHtml = [...spatialEdges.slice(0, 12), ...cooccurrenceEdges].join("");
     const edgeFallback =
       objectNodes.length === 1
@@ -525,6 +597,7 @@
           <span>Detected Object Graph</span>
           <strong>${objectNodes.length} object${objectNodes.length === 1 ? "" : "s"}</strong>
         </div>
+        ${networkHtml}
         <div class="media-object-node-map">${nodesHtml}</div>
         <div class="media-object-edge-list">
           ${edgesHtml || `<div class="media-object-graph-empty">${escHtml(edgeFallback)}</div>`}
@@ -556,10 +629,21 @@
           )
           .join("")
       : '<span class="media-no-detections">No objects</span>';
+    const descriptions = detections
+      .filter((item) => item.description)
+      .map(
+        (item) => `
+          <button type="button" class="media-detection-note" data-node-id="${escHtml(item.id)}">
+            <strong>${escHtml(item.object_label || "object")} ${(Number(item.confidence || 0)).toFixed(2)}</strong>
+            <span>${escHtml(item.description)}</span>
+          </button>
+        `,
+      )
+      .join("");
     return `
       <article class="media-frame-card" data-node-id="${escHtml(frame.id)}">
         <div class="media-frame-image-wrap">
-          <img class="media-frame-img" src="${mediaFrameUrl(frameId)}" alt="${escHtml(frame.label)}" loading="lazy" />
+          <img class="media-frame-img" src="${mediaFrameUrl(frameId)}" alt="${escHtml(frame.label)}" loading="eager" decoding="async" />
           ${boxes}
         </div>
         <div class="media-frame-card-meta">
@@ -567,7 +651,51 @@
           <strong>${detections.length} detection${detections.length === 1 ? "" : "s"}</strong>
         </div>
         <div class="media-detection-list">${chips}</div>
+        ${descriptions ? `<div class="media-detection-notes">${descriptions}</div>` : ""}
       </article>
+    `;
+  }
+
+  function mediaDescriptionsForNode(node, edges, nodes) {
+    if (!node) return [];
+    if (node.entity_type === "MEDIA_OBJECT") {
+      return node.description ? [node] : [];
+    }
+    if (node.entity_type === "MEDIA_FRAME") {
+      const objectIds = new Set(
+        edges
+          .filter((edge) => edge.type === "HAS_DETECTION" && edge.source === node.id)
+          .map((edge) => edge.target),
+      );
+      return nodes.filter((item) => objectIds.has(item.id) && item.description);
+    }
+    if (node.entity_type === "MEDIA_ASSET") {
+      return nodes.filter(
+        (item) =>
+          item.entity_type === "MEDIA_OBJECT" &&
+          item.asset_id &&
+          node.id === `asset:${item.asset_id}` &&
+          item.description,
+      );
+    }
+    return [];
+  }
+
+  function mediaDescriptionListHtml(items) {
+    if (!items.length) return "";
+    return `
+      <div class="media-detail-description-list">
+        ${items
+          .map(
+            (item) => `
+              <div class="media-detection-description">
+                <strong>${escHtml(item.object_label || item.label || "object")} ${Number(item.confidence || 0).toFixed(2)}</strong>
+                <span>${escHtml(item.description)}</span>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
     `;
   }
 
@@ -687,7 +815,7 @@
         setMediaDetail(node, edges, nodes, null);
       });
     });
-    cyRoot.querySelectorAll(".media-object-chip,.media-bbox").forEach((control) => {
+    cyRoot.querySelectorAll(".media-object-chip,.media-bbox,.media-detection-note").forEach((control) => {
       control.addEventListener("click", (event) => {
         event.stopPropagation();
         const node = nodes.find((item) => item.id === control.getAttribute("data-node-id"));
@@ -717,10 +845,11 @@
     }
     const linked = edges.filter((e) => e.source === node.id || e.target === node.id);
     const bbox = Array.isArray(node.bbox) ? node.bbox.map((v) => Number(v).toFixed(1)).join(", ") : "";
+    const descriptionItems = mediaDescriptionsForNode(node, edges, nodes);
     detail.innerHTML = `
       <div class="node-detail-header">${escHtml(node.label)}</div>
       ${mediaPreviewHtml(node, { compact: true })}
-      ${node.description ? `<div class="media-detection-description">${escHtml(node.description)}</div>` : ""}
+      ${mediaDescriptionListHtml(descriptionItems)}
       <div class="detail-field"><span class="detail-key">TYPE</span><span class="detail-val">${escHtml(node.entity_type || "UNKNOWN")}</span></div>
       ${node.media_type ? `<div class="detail-field"><span class="detail-key">MEDIA</span><span class="detail-val">${escHtml(node.media_type)}</span></div>` : ""}
       ${node.object_label ? `<div class="detail-field"><span class="detail-key">OBJECT</span><span class="detail-val">${escHtml(node.object_label)}</span></div>` : ""}
