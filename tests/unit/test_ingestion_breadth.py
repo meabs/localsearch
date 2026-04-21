@@ -181,6 +181,10 @@ async def test_media_ingest_uses_stubbed_local_whisper_path(tmp_path, monkeypatc
     con = duck_store.init_db(str(tmp_path / "media.duckdb"))
     row = con.execute("SELECT format, source_hash IS NOT NULL FROM documents").fetchone()
     assert row == ("media", True)
+    events = duck_store.list_ingestion_events(con, case_ref="OP_MEDIA")
+    assert events[0]["source_type"] == "media"
+    assert events[0]["status"] == "success"
+    assert events[0]["chunks"] == 1
 
 
 class _FakeVectorStore:

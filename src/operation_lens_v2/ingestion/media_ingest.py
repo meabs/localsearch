@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 
 from operation_lens_v2.config import settings
@@ -49,6 +51,10 @@ class TranscriptionResult:
     error: str | None = None
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def transcribe_media(media_path: Path, *, model_name: str | None = None) -> TranscriptionResult:
     """Transcribe audio/video with local Whisper when the optional package is installed."""
     try:
@@ -85,9 +91,30 @@ async def ingest_media(
     resolved_case_name = case_name or case_ref.replace("_", " ").title()
     case_id = duck_store.create_case(con, case_ref=case_ref, case_name=resolved_case_name)
     doc_id = str(uuid4())
+    event_id = str(uuid4())
+    started_at = _utc_now()
+    started_perf = perf_counter()
     fingerprint = fingerprint_path(media_path)
 
-    transcription = transcribe_media(media_path)
+    try:
+        transcription = transcribe_media(media_path)
+    except Exception as exc:
+        duration_ms = int((perf_counter() - started_perf) * 1000)
+        duck_store.record_ingestion_event(
+            con,
+            event_id=event_id,
+            case_id=case_id,
+            doc_id=doc_id,
+            source_path=str(media_path),
+            source_type="media",
+            status="failed",
+            started_at=started_at,
+            completed_at=_utc_now(),
+            duration_ms=duration_ms,
+            error_message=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+
     if not transcription.text:
         duck_store.upsert_document(
             con,
@@ -102,7 +129,7 @@ async def ingest_media(
             source_size_bytes=fingerprint.size_bytes,
             source_mtime_ns=fingerprint.mtime_ns,
         )
-        return {
+        result = {
             "doc_id": doc_id,
             "case_ref": case_ref,
             "pages": 0,
@@ -112,6 +139,25 @@ async def ingest_media(
             "transcribed": False,
             "transcription_error": transcription.error or "empty transcription",
         }
+        duration_ms = int((perf_counter() - started_perf) * 1000)
+        duck_store.record_ingestion_event(
+            con,
+            event_id=event_id,
+            case_id=case_id,
+            doc_id=doc_id,
+            source_path=str(media_path),
+            source_type="media",
+            status="transcription_empty",
+            started_at=started_at,
+            completed_at=_utc_now(),
+            duration_ms=duration_ms,
+            pages=0,
+            chunks=0,
+            relationships_new=0,
+            ocr_used=False,
+            notes=transcription.error or "empty transcription",
+        )
+        return result
 
     duck_store.upsert_document(
         con,
@@ -151,7 +197,7 @@ async def ingest_media(
 
     if vector_rows:
         lance.upsert(vector_rows)
-    return {
+    result = {
         "doc_id": doc_id,
         "case_ref": case_ref,
         "pages": 1,
@@ -160,6 +206,26 @@ async def ingest_media(
         "format": "media",
         "transcribed": True,
     }
+    duration_ms = int((perf_counter() - started_perf) * 1000)
+    duck_store.record_ingestion_event(
+        con,
+        event_id=event_id,
+        case_id=case_id,
+        doc_id=doc_id,
+        source_path=str(media_path),
+        source_type="media",
+        status="success",
+        started_at=started_at,
+        completed_at=_utc_now(),
+        duration_ms=duration_ms,
+        pages=1,
+        chunks=len(chunks),
+        entities_new=duck_store.count_entities_first_seen_in(con, doc_id),
+        relationships_new=relationship_count,
+        ocr_used=False,
+        notes=f"transcription_method={transcription.method}; source_hash={fingerprint.sha256}",
+    )
+    return result
 
 
 async def _extract_entities_relationships(con, chunk: Chunk, doc_id: str) -> int:
