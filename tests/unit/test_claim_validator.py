@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from operation_lens_v2.query.claim_validator import validate_claims
+from operation_lens_v2.query.evidence_builder import build_evidence_packet
 
 
 @pytest.mark.asyncio
@@ -191,3 +192,191 @@ async def test_validator_preserves_inline_citation_answer_without_structured_cla
     assert "North Yard" in out["answer"]
     assert out["claims"] == []
     assert out["grounding_controls"]["validation_skipped"] is True
+
+
+@pytest.mark.asyncio
+async def test_claim_validator_uses_multi_hop_graph_evidence(monkeypatch) -> None:
+    async def fake_validate(claim_text: str, evidence_spans: list[str]) -> dict[str, object]:
+        assert any(
+            "Graph traversal links Marcus Webb to Rania Khalil" in span
+            for span in evidence_spans
+        )
+        return {"status": "SUPPORTED", "confidence": 0.8, "note": "multi-hop"}
+
+    monkeypatch.setattr(
+        "operation_lens_v2.query.claim_validator._validate_single_claim",
+        fake_validate,
+    )
+
+    payload = {
+        "answer": "",
+        "claims": [{"text": "Marcus Webb is connected to Rania Khalil", "citations": []}],
+        "evidence_packet": {
+            "graph_evidence": [
+                {
+                    "source_name": "Marcus Webb",
+                    "target_name": "RX71 KLD",
+                    "span_text": "Marcus Webb used RX71 KLD.",
+                    "doc_id": "D1",
+                    "page": 1,
+                    "chunk_id": "C1",
+                },
+                {
+                    "source_name": "RX71 KLD",
+                    "target_name": "Rania Khalil",
+                    "span_text": "Rania Khalil drove RX71 KLD.",
+                    "doc_id": "D2",
+                    "page": 2,
+                    "chunk_id": "C2",
+                },
+            ]
+        },
+    }
+
+    out = await validate_claims(payload)
+
+    assert out["claims"][0]["status"] == "SUPPORTED"
+    assert {c["doc_id"] for c in out["claims"][0]["citations"]} == {"D1", "D2"}
+
+
+@pytest.mark.asyncio
+async def test_claim_validator_tracks_negative_evidence(monkeypatch) -> None:
+    async def fake_validate(claim_text: str, evidence_spans: list[str]) -> dict[str, object]:
+        assert any("denied knowing" in span for span in evidence_spans)
+        return {"status": "SUPPORTED", "confidence": 0.85, "note": "explicit denial"}
+
+    monkeypatch.setattr(
+        "operation_lens_v2.query.claim_validator._validate_single_claim",
+        fake_validate,
+    )
+
+    payload = {
+        "answer": "",
+        "claims": [{"text": "Marcus Webb denied knowing Rania Khalil", "citations": []}],
+        "evidence_packet": {
+            "negative_evidence": [
+                {
+                    "kind": "explicit_denial",
+                    "text": "Marcus Webb denied knowing Rania Khalil during interview.",
+                    "citation": {
+                        "doc_id": "D3",
+                        "page": 4,
+                        "chunk_id": "C9",
+                        "span_text": "Marcus Webb denied knowing Rania Khalil during interview.",
+                    },
+                }
+            ]
+        },
+    }
+
+    out = await validate_claims(payload)
+
+    assert out["claims"][0]["negative_evidence"]
+    assert out["grounding_controls"]["negative_evidence_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_claim_validator_supports_multi_hop_graph_evidence(monkeypatch) -> None:
+    async def no_extraction(answer_text: str) -> list[str]:
+        return []
+
+    monkeypatch.setattr(
+        "operation_lens_v2.query.claim_validator._extract_claims_from_answer",
+        no_extraction,
+    )
+
+    payload = {
+        "answer": "",
+        "claims": [{"text": "Marcus Webb is linked to Rania Khalil", "citations": []}],
+        "evidence_packet": {
+            "relationships": [
+                {
+                    "source_name": "Marcus Webb",
+                    "target_name": "RX71 KLD",
+                    "relation_type": "OWNS",
+                    "doc_id": "doc-1",
+                    "doc_name": "intel-1.pdf",
+                    "page": 1,
+                    "chunk_id": "chunk-1",
+                    "span_text": "Marcus Webb admits owning RX71 KLD.",
+                },
+                {
+                    "source_name": "RX71 KLD",
+                    "target_name": "Rania Khalil",
+                    "relation_type": "DRIVEN_BY",
+                    "doc_id": "doc-2",
+                    "doc_name": "surv-1.pdf",
+                    "page": 2,
+                    "chunk_id": "chunk-2",
+                    "span_text": "RX71 KLD driver identified as Rania Khalil.",
+                },
+            ]
+        },
+    }
+
+    out = await validate_claims(payload)
+
+    assert out["claims"][0]["status"] == "SUPPORTED"
+    assert {citation["doc_id"] for citation in out["claims"][0]["citations"]} == {
+        "doc-1",
+        "doc-2",
+    }
+
+
+@pytest.mark.asyncio
+async def test_claim_validator_records_explicit_denial_evidence(monkeypatch) -> None:
+    async def no_extraction(answer_text: str) -> list[str]:
+        return []
+
+    monkeypatch.setattr(
+        "operation_lens_v2.query.claim_validator._extract_claims_from_answer",
+        no_extraction,
+    )
+
+    payload = {
+        "answer": "",
+        "claims": [{"text": "Webb denied knowing Khalil", "citations": []}],
+        "evidence_packet": {
+            "negative_evidence": [
+                {
+                    "kind": "explicit_denial",
+                    "text": "Webb denied knowing Khalil during interview.",
+                    "citation": {
+                        "doc_id": "doc-denial",
+                        "doc_name": "interview.pdf",
+                        "page": 3,
+                        "chunk_id": "chunk-denial",
+                        "span_text": "Webb denied knowing Khalil during interview.",
+                    },
+                }
+            ]
+        },
+    }
+
+    out = await validate_claims(payload)
+
+    assert out["claims"][0]["status"] == "SUPPORTED"
+    assert out["claims"][0]["negative_evidence"][0]["kind"] == "explicit_denial"
+    assert out["grounding_controls"]["negative_evidence_count"] == 1
+
+
+def test_evidence_builder_tracks_explicit_denials() -> None:
+    packet = build_evidence_packet(
+        query_text="Did Webb know Khalil?",
+        query_intent="general_query",
+        entities_resolved=[],
+        ranked_results=[
+            {
+                "source": "fts",
+                "chunk_id": "chunk-denial",
+                "doc_id": "doc-denial",
+                "doc_name": "interview.pdf",
+                "page": 3,
+                "text": "Webb denied knowing Khalil during interview.",
+            }
+        ],
+    )
+
+    assert packet["negative_evidence"]
+    assert packet["negative_evidence"][0]["kind"] == "explicit_denial"
+    assert "Webb denied knowing Khalil" in packet["negative_evidence"][0]["text"]

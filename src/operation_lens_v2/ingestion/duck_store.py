@@ -165,8 +165,10 @@ def init_db(path: str) -> duckdb.DuckDBPyConnection:
     _ensure_temporal_columns(con)
     _ensure_ingestion_events_table(con)
     _ensure_entity_review_columns(con)
+    _ensure_alias_resolution_columns(con)
     _ensure_graph_indexes(con)
     _ensure_document_columns(con)
+    _ensure_document_page_quality_table(con)
     _try_ddl(
         con,
         "PRAGMA create_fts_index('chunks', 'chunk_id', 'text');",
@@ -213,8 +215,30 @@ def _ensure_document_columns(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE documents ADD COLUMN format TEXT DEFAULT 'pdf';",
         "ALTER TABLE documents ADD COLUMN ocr_failed BOOLEAN DEFAULT false;",
         "ALTER TABLE documents ADD COLUMN thumbnail_blob BLOB;",
+        "ALTER TABLE documents ADD COLUMN source_hash TEXT;",
+        "ALTER TABLE documents ADD COLUMN source_size_bytes BIGINT;",
+        "ALTER TABLE documents ADD COLUMN source_mtime_ns BIGINT;",
+        "ALTER TABLE documents ADD COLUMN supersedes_doc_id TEXT;",
     ):
         _try_ddl(con, ddl, context="documents.format")
+
+
+def _ensure_document_page_quality_table(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_page_quality (
+          doc_id TEXT REFERENCES documents(doc_id),
+          page INTEGER NOT NULL,
+          extraction_method TEXT,
+          ocr_confidence FLOAT,
+          needs_review BOOLEAN DEFAULT false,
+          redaction_count INTEGER DEFAULT 0,
+          evidence_gap BOOLEAN DEFAULT false,
+          notes TEXT,
+          PRIMARY KEY (doc_id, page)
+        );
+        """
+    )
 
 
 def _ensure_graph_indexes(con: duckdb.DuckDBPyConnection) -> None:
@@ -266,6 +290,15 @@ def _ensure_entity_review_columns(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE entities ADD COLUMN reviewed_by TEXT;",
     ):
         _try_ddl(con, ddl, context="entities.review")
+
+
+def _ensure_alias_resolution_columns(con: duckdb.DuckDBPyConnection) -> None:
+    for ddl in (
+        "ALTER TABLE entity_aliases ADD COLUMN resolution_confidence FLOAT;",
+        "ALTER TABLE entity_aliases ADD COLUMN resolution_method TEXT;",
+        "ALTER TABLE entity_aliases ADD COLUMN matched_entity_id TEXT;",
+    ):
+        _try_ddl(con, ddl, context="entity_aliases.resolution")
 
 
 def _ensure_attachments_table(con: duckdb.DuckDBPyConnection) -> None:
@@ -507,14 +540,19 @@ def upsert_document(
     doc_format: str = "pdf",
     ocr_failed: bool = False,
     thumbnail_blob: bytes | None = None,
+    source_hash: str | None = None,
+    source_size_bytes: int | None = None,
+    source_mtime_ns: int | None = None,
+    supersedes_doc_id: str | None = None,
 ) -> None:
     con.execute(
         """
         INSERT OR REPLACE INTO documents (
           doc_id, case_id, filename, filepath, format, page_count,
-          ocr_used, ocr_failed, thumbnail_blob
+          ocr_used, ocr_failed, thumbnail_blob,
+          source_hash, source_size_bytes, source_mtime_ns, supersedes_doc_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             doc_id,
@@ -526,8 +564,73 @@ def upsert_document(
             ocr_used,
             ocr_failed,
             thumbnail_blob,
+            source_hash,
+            source_size_bytes,
+            source_mtime_ns,
+            supersedes_doc_id,
         ],
     )
+
+
+def upsert_page_quality(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    doc_id: str,
+    page: int,
+    extraction_method: str,
+    ocr_confidence: float | None,
+    needs_review: bool,
+    redaction_count: int = 0,
+    evidence_gap: bool = False,
+    notes: str = "",
+) -> None:
+    con.execute(
+        """
+        INSERT OR REPLACE INTO document_page_quality (
+          doc_id, page, extraction_method, ocr_confidence, needs_review,
+          redaction_count, evidence_gap, notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            doc_id,
+            page,
+            extraction_method,
+            ocr_confidence,
+            needs_review,
+            redaction_count,
+            evidence_gap,
+            notes,
+        ],
+    )
+
+
+def list_page_quality(
+    con: duckdb.DuckDBPyConnection,
+    doc_id: str,
+) -> list[dict[str, object]]:
+    rows = con.execute(
+        """
+        SELECT page, extraction_method, ocr_confidence, needs_review,
+               redaction_count, evidence_gap, notes
+        FROM document_page_quality
+        WHERE doc_id = ?
+        ORDER BY page
+        """,
+        [doc_id],
+    ).fetchall()
+    return [
+        {
+            "page": int(row[0]),
+            "extraction_method": row[1],
+            "ocr_confidence": float(row[2]) if row[2] is not None else None,
+            "needs_review": bool(row[3]),
+            "redaction_count": int(row[4] or 0),
+            "evidence_gap": bool(row[5]),
+            "notes": row[6] or "",
+        }
+        for row in rows
+    ]
 
 
 def insert_chunks(con: duckdb.DuckDBPyConnection, chunks: list[Chunk]) -> None:
@@ -597,13 +700,28 @@ def register_alias(
     alias_text: str,
     source_doc: str,
     source_chunk: str,
+    resolution_confidence: float | None = None,
+    resolution_method: str | None = None,
+    matched_entity_id: str | None = None,
 ) -> None:
     con.execute(
         """
-        INSERT INTO entity_aliases (alias_id, entity_id, alias_text, source_doc, source_chunk)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO entity_aliases (
+          alias_id, entity_id, alias_text, source_doc, source_chunk,
+          resolution_confidence, resolution_method, matched_entity_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [str(uuid4()), entity_id, alias_text, source_doc, source_chunk],
+        [
+            str(uuid4()),
+            entity_id,
+            alias_text,
+            source_doc,
+            source_chunk,
+            resolution_confidence,
+            resolution_method,
+            matched_entity_id,
+        ],
     )
     con.execute(
         "UPDATE entities SET mention_count = mention_count + 1 WHERE entity_id = ?",

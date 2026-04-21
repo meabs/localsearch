@@ -108,7 +108,7 @@ async def ingest_csv(
 
         canonical_id_by_surface: dict[str, str] = {}
         for entity in merged_entities:
-            canonical_id_by_surface[entity.text] = normaliser.resolve_entity(
+            resolution = normaliser.resolve_entity_with_provenance(
                 surface=entity.text,
                 entity_type=entity.entity_type,
                 con=duck_con,
@@ -117,6 +117,7 @@ async def ingest_csv(
                 threshold=settings.alias_threshold,
                 confidence=float(getattr(entity, "confidence", 1.0) or 1.0),
             )
+            canonical_id_by_surface[entity.text] = resolution.entity_id
 
         relationships = await relationship_extractor.extract_relationships(text, merged_entities)
         for rel in relationships:

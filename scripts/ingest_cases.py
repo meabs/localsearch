@@ -25,21 +25,34 @@ def infer_case_ref(filename: str) -> str:
 def main() -> None:
     base = "http://127.0.0.1:8000"
     force = _env_bool("INGEST_FORCE")
-    pdfs = sorted(Path("data/pdfs").glob("*.pdf"))
+    root = Path(os.environ.get("INGEST_ROOT", "data/pdfs"))
+    inputs = sorted(
+        [
+            *root.glob("*.pdf"),
+            *root.glob("*.csv"),
+            *root.glob("*.tsv"),
+            *root.glob("*.jpg"),
+            *root.glob("*.jpeg"),
+            *root.glob("*.png"),
+            *root.glob("*.bmp"),
+            *root.glob("*.tif"),
+            *root.glob("*.tiff"),
+        ]
+    )
     # Large first-run model downloads (e.g., GLiNER) can exceed short timeouts.
     with httpx.Client(timeout=1800.0) as client:
-        for pdf in pdfs:
-            case_ref = infer_case_ref(pdf.name)
+        for input_path in inputs:
+            case_ref = infer_case_ref(input_path.name)
             resp = client.post(
                 f"{base}/ingest",
                 json={
-                    "pdf_path": str(pdf.resolve()),
+                    "pdf_path": str(input_path.resolve()),
                     "case_ref": case_ref,
                     "case_name": case_ref.replace("_", " ").title(),
                     "force": force,
                 },
             )
-            print(pdf.name, resp.status_code, case_ref)
+            print(input_path.name, resp.status_code, case_ref)
 
 
 if __name__ == "__main__":

@@ -69,6 +69,16 @@ class Settings(BaseSettings):
     low_confidence_threshold: float = Field(
         default=0.50, alias="LOW_CONFIDENCE_THRESHOLD"
     )
+    ocr_low_confidence_threshold: float = Field(
+        default=0.60, alias="OCR_LOW_CONFIDENCE_THRESHOLD"
+    )
+
+    # Optional local transcription / handwritten OCR models. These are only
+    # used when their heavy runtime packages are installed in the local env.
+    whisper_model: str = Field(default="base", alias="WHISPER_MODEL")
+    trocr_model: str = Field(
+        default="microsoft/trocr-base-handwritten", alias="TROCR_MODEL"
+    )
 
     # ── Relationship extraction ───────────────────────────────────────────────
     pattern_confidence: float = Field(default=0.85, alias="PATTERN_CONFIDENCE")
@@ -81,10 +91,23 @@ class Settings(BaseSettings):
     fts_top_k: int = Field(default=15, alias="FTS_TOP_K")
     graph_max_hops: int = Field(default=2, alias="GRAPH_MAX_HOPS")
     rerank_top_n: int = Field(default=20, alias="RERANK_TOP_N")
+    rerank_rrf_k: int = Field(default=60, alias="RERANK_RRF_K")
+    rerank_source_weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "graph": 1.3,
+            "exact": 1.1,
+            "vector": 1.0,
+            "fts": 0.9,
+            "document": 1.0,
+        },
+        alias="RERANK_SOURCE_WEIGHTS",
+    )
     max_evidence_tokens: int = Field(default=24000, alias="MAX_EVIDENCE_TOKENS")
     hybrid_recall_default: bool = Field(default=True, alias="HYBRID_RECALL_DEFAULT")
     hybrid_candidate_multiplier: int = Field(default=3, alias="HYBRID_CANDIDATE_MULTIPLIER")
     min_doc_coverage: int = Field(default=4, alias="MIN_DOC_COVERAGE")
+    query_cache_enabled: bool = Field(default=True, alias="QUERY_CACHE_ENABLED")
+    query_cache_max_entries: int = Field(default=128, alias="QUERY_CACHE_MAX_ENTRIES")
 
     # ── Geocoding (Nominatim — sends location strings to OSM) ─────────────────
     geocoding_enabled: bool = Field(default=True, alias="GEOCODING_ENABLED")

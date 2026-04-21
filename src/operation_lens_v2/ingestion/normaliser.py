@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 
 from rapidfuzz.distance import JaroWinkler
 
@@ -16,6 +17,15 @@ from operation_lens_v2.ingestion import duck_store
 from operation_lens_v2.ingestion.entity_schema import NormaliseRule, get_schema
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class EntityResolution:
+    entity_id: str
+    canonical_name: str
+    confidence: float
+    method: str
+    matched_entity_id: str | None = None
 
 
 def _title_case_words(value: str) -> str:
@@ -187,20 +197,52 @@ def resolve_entity(
     existing entity, we take the max of the two so a single strong mention
     lifts a previously-weak entity out of the review queue.
     """
+    return resolve_entity_with_provenance(
+        surface=surface,
+        entity_type=entity_type,
+        con=con,
+        source_doc=source_doc,
+        source_chunk=source_chunk,
+        threshold=threshold,
+        confidence=confidence,
+    ).entity_id
+
+
+def resolve_entity_with_provenance(
+    *,
+    surface: str,
+    entity_type: str,
+    con,
+    source_doc: str,
+    source_chunk: str,
+    threshold: float | None = None,
+    confidence: float = 1.0,
+) -> EntityResolution:
+    """Resolve an entity and persist alias-level resolution provenance."""
     canonical = normalise(surface, entity_type)
     match_threshold = threshold if threshold is not None else settings.alias_threshold
     candidates = duck_store.get_entities_by_type(con, entity_type)
     for entity_id, candidate_name in candidates:
-        if JaroWinkler.similarity(canonical, candidate_name) >= match_threshold:
+        score = JaroWinkler.similarity(canonical, candidate_name)
+        if score >= match_threshold:
             duck_store.register_alias(
                 con,
                 entity_id=entity_id,
                 alias_text=surface,
                 source_doc=source_doc,
                 source_chunk=source_chunk,
+                resolution_confidence=score,
+                resolution_method="jaro_winkler",
+                matched_entity_id=entity_id,
             )
             duck_store.bump_entity_confidence(con, entity_id, confidence)
-            return entity_id
+            return EntityResolution(
+                entity_id=entity_id,
+                canonical_name=candidate_name,
+                confidence=score,
+                method="jaro_winkler",
+                matched_entity_id=entity_id,
+            )
     new_id = duck_store.create_entity(
         con,
         canonical,
@@ -214,5 +256,13 @@ def resolve_entity(
         alias_text=surface,
         source_doc=source_doc,
         source_chunk=source_chunk,
+        resolution_confidence=1.0,
+        resolution_method="new_entity",
+        matched_entity_id=None,
     )
-    return new_id
+    return EntityResolution(
+        entity_id=new_id,
+        canonical_name=canonical,
+        confidence=1.0,
+        method="new_entity",
+    )

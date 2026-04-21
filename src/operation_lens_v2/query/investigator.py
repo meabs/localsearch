@@ -8,13 +8,16 @@ InvestigationReport; the briefing writer composes the final narrative from that.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from functools import wraps
+from typing import Any
 
 import duckdb
 import httpx
 
-from operation_lens_v2.config import Settings, settings as default_settings
+from operation_lens_v2.config import Settings
+from operation_lens_v2.config import settings as default_settings
 from operation_lens_v2.query import tools
 from operation_lens_v2.query.prompts import render_investigator_prompt
 from operation_lens_v2.query.scope import ScopeContext, ScopeViolation
@@ -51,6 +54,98 @@ class InvestigatorDeps:
 
     scope: ScopeContext
     duck: duckdb.DuckDBPyConnection
+
+
+@dataclass(slots=True)
+class InvestigatorStepHandlers:
+    """Tool-call handlers for one investigator ReAct step.
+
+    Keeping these handlers separate from PydanticAI registration makes each tool
+    dispatch testable without driving a full model loop.
+    """
+
+    tool_module: Any = tools
+
+    async def search_entities(
+        self,
+        deps: InvestigatorDeps,
+        query: str,
+        entity_type: str | None = None,
+    ) -> list[EntityHit]:
+        return await self.tool_module.search_entities(
+            deps.scope, query, deps.duck, entity_type=entity_type
+        )
+
+    async def get_entity_profile(
+        self,
+        deps: InvestigatorDeps,
+        entity_id: str,
+    ) -> EntityProfile | None:
+        return await self.tool_module.get_entity_profile(deps.scope, entity_id, deps.duck)
+
+    async def get_relationships(
+        self,
+        deps: InvestigatorDeps,
+        entity_id: str,
+        depth: int = 1,
+    ) -> list[RelationshipEdge]:
+        return await self.tool_module.get_relationships(
+            deps.scope, entity_id, deps.duck, depth=depth
+        )
+
+    async def get_cooccurrence(
+        self,
+        deps: InvestigatorDeps,
+        entity_a_id: str,
+        entity_b_id: str,
+    ) -> list[CooccurrenceHit]:
+        return await self.tool_module.get_cooccurrence(
+            deps.scope, entity_a_id, entity_b_id, deps.duck
+        )
+
+    async def get_timeline(
+        self,
+        deps: InvestigatorDeps,
+        entity_ids: list[str] | None = None,
+    ) -> list[DatedEvent]:
+        return await self.tool_module.get_timeline(
+            deps.scope, deps.duck, entity_ids=entity_ids
+        )
+
+    async def fetch_chunk(
+        self,
+        deps: InvestigatorDeps,
+        chunk_id: str,
+    ) -> ChunkText | None:
+        return await self.tool_module.fetch_chunk(deps.scope, chunk_id, deps.duck)
+
+    async def list_documents(
+        self,
+        deps: InvestigatorDeps,
+    ) -> list[DocumentSummary]:
+        return await self.tool_module.list_documents(deps.scope, deps.duck)
+
+    async def get_document_entities(
+        self,
+        deps: InvestigatorDeps,
+        doc_id: str,
+    ) -> list[EntityHit]:
+        return await self.tool_module.get_document_entities(deps.scope, doc_id, deps.duck)
+
+    async def walk_graph(
+        self,
+        deps: InvestigatorDeps,
+        source_entity_id: str,
+        target_entity_id: str,
+        max_hops: int = 3,
+    ) -> list[GraphPath]:
+        return await self.tool_module.walk_graph(
+            deps.scope,
+            source_entity_id,
+            target_entity_id,
+            deps.duck,
+            max_hops=max_hops,
+        )
 
 
 def _build_model(settings: Settings) -> OpenAIChatModel:
@@ -98,7 +193,10 @@ def _select_tool_capable_investigator_model(settings: Settings) -> str | None:
     installed = _list_ollama_models(settings)
     if not installed:
         return None
-    if settings.investigator_model in installed and settings.investigator_model in TOOL_CAPABLE_MODEL_CANDIDATES:
+    if (
+        settings.investigator_model in installed
+        and settings.investigator_model in TOOL_CAPABLE_MODEL_CANDIDATES
+    ):
         return settings.investigator_model
     for candidate in TOOL_CAPABLE_MODEL_CANDIDATES:
         if candidate in installed:
@@ -111,7 +209,7 @@ def _scope_guard(tool_name: str):
     without crashing the run. The model sees the error message and typically retries
     with a valid in-scope argument.
     """
-    from functools import wraps
+
     from pydantic_ai import ModelRetry
 
     def decorator(func):
@@ -153,6 +251,16 @@ def build_investigator(
     def _system_prompt(ctx: RunContext[InvestigatorDeps]) -> str:
         return render_investigator_prompt(ctx.deps.scope)
 
+    register_investigator_tools(agent, InvestigatorStepHandlers())
+    return agent
+
+
+def register_investigator_tools(
+    agent: Agent[InvestigatorDeps, InvestigationReport],
+    handlers: InvestigatorStepHandlers,
+) -> None:
+    """Register the scope-guarded investigator tools on an agent."""
+
     @agent.tool
     @_scope_guard("search_entities")
     async def search_entities(
@@ -161,9 +269,7 @@ def build_investigator(
         entity_type: str | None = None,
     ) -> list[EntityHit]:
         """Find entities whose canonical name or aliases match the query."""
-        return await tools.search_entities(
-            ctx.deps.scope, query, ctx.deps.duck, entity_type=entity_type
-        )
+        return await handlers.search_entities(ctx.deps, query, entity_type=entity_type)
 
     @agent.tool
     @_scope_guard("get_entity_profile")
@@ -172,7 +278,7 @@ def build_investigator(
         entity_id: str,
     ) -> EntityProfile | None:
         """Aggregate profile for one entity within the current scope."""
-        return await tools.get_entity_profile(ctx.deps.scope, entity_id, ctx.deps.duck)
+        return await handlers.get_entity_profile(ctx.deps, entity_id)
 
     @agent.tool
     @_scope_guard("get_relationships")
@@ -182,9 +288,7 @@ def build_investigator(
         depth: int = 1,
     ) -> list[RelationshipEdge]:
         """Graph edges touching an entity, up to depth 1 or 2."""
-        return await tools.get_relationships(
-            ctx.deps.scope, entity_id, ctx.deps.duck, depth=depth
-        )
+        return await handlers.get_relationships(ctx.deps, entity_id, depth=depth)
 
     @agent.tool
     @_scope_guard("get_cooccurrence")
@@ -194,9 +298,7 @@ def build_investigator(
         entity_b_id: str,
     ) -> list[CooccurrenceHit]:
         """Chunks where both entities appear together."""
-        return await tools.get_cooccurrence(
-            ctx.deps.scope, entity_a_id, entity_b_id, ctx.deps.duck
-        )
+        return await handlers.get_cooccurrence(ctx.deps, entity_a_id, entity_b_id)
 
     @agent.tool
     @_scope_guard("get_timeline")
@@ -205,7 +307,7 @@ def build_investigator(
         entity_ids: list[str] | None = None,
     ) -> list[DatedEvent]:
         """Dated events in scope, chronologically ordered."""
-        return await tools.get_timeline(ctx.deps.scope, ctx.deps.duck, entity_ids=entity_ids)
+        return await handlers.get_timeline(ctx.deps, entity_ids=entity_ids)
 
     @agent.tool
     @_scope_guard("fetch_chunk")
@@ -214,7 +316,7 @@ def build_investigator(
         chunk_id: str,
     ) -> ChunkText | None:
         """Full text of a single chunk, for precise quoting."""
-        return await tools.fetch_chunk(ctx.deps.scope, chunk_id, ctx.deps.duck)
+        return await handlers.fetch_chunk(ctx.deps, chunk_id)
 
     @agent.tool
     @_scope_guard("list_documents")
@@ -222,7 +324,7 @@ def build_investigator(
         ctx: RunContext[InvestigatorDeps],
     ) -> list[DocumentSummary]:
         """Documents reachable in the current scope."""
-        return await tools.list_documents(ctx.deps.scope, ctx.deps.duck)
+        return await handlers.list_documents(ctx.deps)
 
     @agent.tool
     @_scope_guard("get_document_entities")
@@ -231,7 +333,7 @@ def build_investigator(
         doc_id: str,
     ) -> list[EntityHit]:
         """All entities mentioned in a single document."""
-        return await tools.get_document_entities(ctx.deps.scope, doc_id, ctx.deps.duck)
+        return await handlers.get_document_entities(ctx.deps, doc_id)
 
     @agent.tool
     @_scope_guard("walk_graph")
@@ -242,15 +344,12 @@ def build_investigator(
         max_hops: int = 3,
     ) -> list[GraphPath]:
         """Evidence-backed paths between two entities."""
-        return await tools.walk_graph(
-            ctx.deps.scope,
+        return await handlers.walk_graph(
+            ctx.deps,
             source_entity_id,
             target_entity_id,
-            ctx.deps.duck,
             max_hops=max_hops,
         )
-
-    return agent
 
 
 async def investigate(
@@ -277,7 +376,7 @@ async def investigate(
     limits = UsageLimits(request_limit=settings.investigator_max_iterations)
     try:
         result = await agent.run(query, deps=deps, usage_limits=limits)
-    except UsageLimitExceeded as exc:
+    except UsageLimitExceeded:
         logger.warning(
             "Investigator exhausted its %d-request budget before finishing",
             settings.investigator_max_iterations,
@@ -360,15 +459,15 @@ async def investigate_stream(
       - ``error``          {error_type, message, recoverable}
     """
     try:
-        from pydantic_ai.exceptions import UsageLimitExceeded
-        from pydantic_ai.usage import UsageLimits
         from pydantic_ai._agent_graph import CallToolsNode, End, ModelRequestNode
+        from pydantic_ai.exceptions import UsageLimitExceeded
         from pydantic_ai.messages import (
             TextPart,
             ThinkingPart,
             ToolCallPart,
             ToolReturnPart,
         )
+        from pydantic_ai.usage import UsageLimits
     except ImportError as exc:
         raise RuntimeError("pydantic-ai-slim is not installed in the active environment.") from exc
 
@@ -431,7 +530,8 @@ async def investigate_stream(
                 hypothesis="Investigator ran out of tool-call budget before reaching a conclusion.",
                 confidence="LOW",
                 gaps=[
-                    f"iteration_budget_exhausted: hit {settings.investigator_max_iterations}-request limit"
+                    "iteration_budget_exhausted: hit "
+                    f"{settings.investigator_max_iterations}-request limit"
                 ],
             ).model_dump(),
         }
@@ -447,7 +547,10 @@ async def investigate_stream(
                 yield {
                     "kind": "error",
                     "error_type": "ToolSupportError",
-                    "message": f"{settings.investigator_model} lacks tool support; retrying with {fallback_model}",
+                    "message": (
+                        f"{settings.investigator_model} lacks tool support; "
+                        f"retrying with {fallback_model}"
+                    ),
                     "recoverable": True,
                 }
                 fallback_settings = settings.model_copy(

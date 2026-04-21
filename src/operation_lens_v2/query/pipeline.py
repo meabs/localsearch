@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
+import hashlib
+import json
 import logging
 import re
+from collections import OrderedDict
 from uuid import uuid4
 
 from operation_lens_v2.config import settings
@@ -56,6 +60,191 @@ FOLLOW_UP_CONTEXT_RE = re.compile(
     r"he|she|they|them|their|there|that|those|it|him|her|his|hers|same|again|too"
     r")\b"
 )
+_QUERY_CACHE: OrderedDict[str, dict[str, object]] = OrderedDict()
+
+
+def _normalize_query_for_cache(query_text: str) -> str:
+    return re.sub(r"\s+", " ", query_text.strip().lower())
+
+
+def _corpus_hash(
+    con,
+    *,
+    case_id: str | None = None,
+    doc_ids: set[str] | None = None,
+) -> str:
+    doc_filter = ""
+    params: list[object] = []
+    if doc_ids:
+        placeholders = ",".join("?" for _ in doc_ids)
+        doc_filter = f"WHERE d.doc_id IN ({placeholders})"
+        params.extend(sorted(doc_ids))
+    elif case_id:
+        doc_filter = "WHERE d.case_id = ?"
+        params.append(case_id)
+
+    doc_rows = con.execute(
+        f"""
+        SELECT
+          d.doc_id,
+          d.case_id,
+          d.filename,
+          d.filepath,
+          d.page_count,
+          d.ingested_at,
+          count(c.chunk_id) AS chunk_count,
+          max(c.ingested_at) AS max_chunk_ingested_at
+        FROM documents d
+        LEFT JOIN chunks c ON c.doc_id = d.doc_id
+        {doc_filter}
+        GROUP BY d.doc_id, d.case_id, d.filename, d.filepath, d.page_count, d.ingested_at
+        ORDER BY d.doc_id
+        """,
+        params,
+    ).fetchall()
+
+    alias_rows = con.execute(
+        f"""
+        SELECT
+          ea.alias_id,
+          ea.entity_id,
+          e.canonical_name,
+          e.entity_type,
+          e.mention_count,
+          e.confidence,
+          ea.alias_text,
+          ea.source_doc,
+          ea.source_chunk
+        FROM entity_aliases ea
+        JOIN entities e ON e.entity_id = ea.entity_id
+        JOIN documents d ON d.doc_id = ea.source_doc
+        {doc_filter}
+        ORDER BY ea.alias_id
+        """,
+        params,
+    ).fetchall()
+
+    rel_filter = ""
+    rel_params = list(params)
+    if doc_filter:
+        rel_filter = f"""
+        {doc_filter}
+        """
+    rel_rows = con.execute(
+        f"""
+        SELECT
+          r.rel_id,
+          r.source_entity,
+          r.target_entity,
+          r.relation_type,
+          r.confidence,
+          r.first_evidenced,
+          r.event_time,
+          re.evidence_id,
+          re.chunk_id,
+          re.doc_id,
+          re.page,
+          re.span_text,
+          re.extraction_method
+        FROM relationships r
+        LEFT JOIN relationship_evidence re ON re.rel_id = r.rel_id
+        LEFT JOIN documents d ON d.doc_id = re.doc_id
+        {rel_filter}
+        ORDER BY r.rel_id, re.evidence_id
+        """,
+        rel_params,
+    ).fetchall()
+
+    payload = {
+        "documents": [tuple(str(value) for value in row) for row in doc_rows],
+        "aliases": [tuple(str(value) for value in row) for row in alias_rows],
+        "relationships": [tuple(str(value) for value in row) for row in rel_rows],
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _query_cache_key(
+    *,
+    query_text: str,
+    case_ref: str | None,
+    recall_mode: str,
+    use_cloud_reasoning: bool,
+    corpus_hash: str,
+) -> str:
+    payload = {
+        "query": _normalize_query_for_cache(query_text),
+        "case_ref": case_ref or "ALL_CASES",
+        "recall_mode": recall_mode,
+        "use_cloud": use_cloud_reasoning,
+        "corpus_hash": corpus_hash,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _cache_get(cache_key: str) -> dict[str, object] | None:
+    if not settings.query_cache_enabled:
+        return None
+    cached = _QUERY_CACHE.get(cache_key)
+    if cached is None:
+        return None
+    _QUERY_CACHE.move_to_end(cache_key)
+    result = copy.deepcopy(cached)
+    result["query_id"] = str(uuid4())
+    result["cache_hit"] = True
+    return result
+
+
+def _cache_put(cache_key: str, result: dict[str, object]) -> None:
+    if not settings.query_cache_enabled or settings.query_cache_max_entries <= 0:
+        return
+    cached = copy.deepcopy(result)
+    cached.pop("query_id", None)
+    cached.pop("cache_hit", None)
+    _QUERY_CACHE[cache_key] = cached
+    _QUERY_CACHE.move_to_end(cache_key)
+    while len(_QUERY_CACHE) > settings.query_cache_max_entries:
+        _QUERY_CACHE.popitem(last=False)
+
+
+def _persist_cached_query(
+    con,
+    *,
+    query_id: str,
+    query_text: str,
+    intent: object,
+    backend: object,
+    claims: object,
+) -> None:
+    con.execute(
+        (
+            "INSERT INTO queries "
+            "(query_id, query_text, intent, llm_backend) "
+            "VALUES (?, ?, ?, ?)"
+        ),
+        [query_id, query_text, str(intent), str(backend or "cache")],
+    )
+    claim_rows = claims if isinstance(claims, list) else []
+    for claim in claim_rows:
+        if not isinstance(claim, dict):
+            continue
+        con.execute(
+            """
+            INSERT INTO answer_spans (
+              span_id, query_id, claim_text, supporting_evidence, confidence, validated
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                str(uuid4()),
+                query_id,
+                claim.get("text", ""),
+                [f"{c.get('doc_id')}:{c.get('page')}" for c in claim.get("citations", [])],
+                claim.get("confidence", 0.0),
+                bool(claim.get("validated", False)),
+            ],
+        )
 
 
 def _inventory_name_filter_sql(entity_type: str) -> tuple[str, list[str]]:
@@ -697,6 +886,35 @@ async def run_query(
         timer.log_summary()
         return result
 
+    use_cloud_reasoning = (
+        settings.allow_cloud_reasoning if use_cloud is None else bool(use_cloud)
+    )
+    with timer.measure("query_cache"):
+        corpus_hash = _corpus_hash(
+            con,
+            case_id=case_id,
+            doc_ids=scoped_doc_ids or None,
+        )
+        cache_key = _query_cache_key(
+            query_text=effective_query,
+            case_ref=case_ref,
+            recall_mode=resolved_recall_mode,
+            use_cloud_reasoning=use_cloud_reasoning,
+            corpus_hash=corpus_hash,
+        )
+        cached_result = _cache_get(cache_key)
+        if cached_result is not None:
+            _persist_cached_query(
+                con,
+                query_id=str(cached_result["query_id"]),
+                query_text=effective_query,
+                intent=cached_result.get("intent", parsed["intent"]),
+                backend=cached_result.get("backend"),
+                claims=cached_result.get("claims"),
+            )
+            timer.log_summary()
+            return cached_result
+
     vector_task = asyncio.create_task(
         retriever_vector.retrieve_vector(effective_query, limit=vector_limit)
     )
@@ -767,14 +985,11 @@ async def run_query(
                 case_scope=case_ref or "ALL_CASES",
             )
 
-        use_cloud_reasoning = (
-            settings.allow_cloud_reasoning if use_cloud is None else bool(use_cloud)
-        )
-
         answer_payload = await timer.await_stage(
             "generate_answer",
             llm_router.generate_answer(packet, use_cloud=use_cloud_reasoning),
         )
+        answer_payload["evidence_packet"] = packet
         validated = await timer.await_stage(
             "validate_claims",
             claim_validator.validate_claims(answer_payload),
@@ -809,7 +1024,7 @@ async def run_query(
                     ],
                 )
 
-        return {
+        result = {
             "query_id": query_id,
             "intent": parsed["intent"],
             "entities": parsed["entities"],
@@ -822,6 +1037,8 @@ async def run_query(
             "result_count": len(ranked),
             "top_results": ranked[:TOP_RESULTS_LIMIT],
         }
+        _cache_put(cache_key, result)
+        return result
     finally:
         if not vector_task.done():
             vector_task.cancel()

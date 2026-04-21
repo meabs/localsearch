@@ -18,6 +18,33 @@ OMITTED_CLAIMS_GAP = (
 VALIDATION_CONCURRENCY_LIMIT = 4
 STRICT_FACTS_ONLY_MODE = True
 CITATION_MARKER_RE = re.compile(r"\[[^\],]+,\s*p\.\s*\d+\]")
+DENIAL_CLAIM_RE = re.compile(
+    r"\b(?:denied|denies|deny|did\s+not\s+know|does\s+not\s+know|"
+    r"no\s+known|not\s+known|no\s+connection|no\s+link|unconnected)\b",
+    re.IGNORECASE,
+)
+WORD_RE = re.compile(r"[a-z0-9]+")
+STOPWORDS = {
+    "about",
+    "after",
+    "also",
+    "been",
+    "being",
+    "from",
+    "have",
+    "into",
+    "known",
+    "that",
+    "their",
+    "there",
+    "they",
+    "this",
+    "with",
+    "were",
+    "what",
+    "when",
+    "where",
+}
 
 
 def _strip_markdown_fences(text: str) -> str:
@@ -111,6 +138,165 @@ def _heuristic_validate(claim_text: str, evidence_spans: list[str]) -> dict[str,
     return {"status": "UNSUPPORTED", "confidence": 0.2, "note": "Heuristic: insufficient overlap."}
 
 
+def _tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in WORD_RE.findall(text.lower())
+        if len(token) > 2 and token not in STOPWORDS
+    }
+
+
+def _overlap_ratio(left: str, right: str) -> float:
+    left_tokens = _tokens(left)
+    if not left_tokens:
+        return 0.0
+    right_tokens = _tokens(right)
+    return len(left_tokens & right_tokens) / len(left_tokens)
+
+
+def _citation_key(citation: dict[str, Any]) -> tuple[Any, Any, Any]:
+    return citation.get("doc_id"), citation.get("page"), citation.get("chunk_id")
+
+
+def _dedupe_citations(citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[Any, Any, Any]] = set()
+    for citation in citations:
+        key = _citation_key(citation)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(citation)
+    return out
+
+
+def _citation_from_relationship(edge: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "doc_id": edge.get("doc_id"),
+        "doc_name": edge.get("doc_name"),
+        "page": edge.get("page"),
+        "chunk_id": edge.get("chunk_id"),
+        "span_text": edge.get("span_text", ""),
+    }
+
+
+def _edge_name(edge: dict[str, Any], side: str) -> str:
+    return str(edge.get(f"{side}_name") or edge.get(f"{side}_entity") or "")
+
+
+def _relationship_edges(evidence_packet: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = evidence_packet.get("graph_evidence") or evidence_packet.get("relationships") or []
+    return [dict(row) for row in rows if isinstance(row, dict)]
+
+
+def _mentioned_entity_names(claim_text: str, edges: list[dict[str, Any]]) -> set[str]:
+    claim_l = claim_text.lower()
+    names: set[str] = set()
+    for edge in edges:
+        for side in ("source", "target"):
+            name = _edge_name(edge, side).strip()
+            if name and name.lower() in claim_l:
+                names.add(name)
+    return names
+
+
+def _adjacency(edges: list[dict[str, Any]]) -> dict[str, list[tuple[str, dict[str, Any]]]]:
+    graph: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for edge in edges:
+        source = _edge_name(edge, "source").strip()
+        target = _edge_name(edge, "target").strip()
+        if not source or not target:
+            continue
+        graph.setdefault(source, []).append((target, edge))
+        graph.setdefault(target, []).append((source, edge))
+    return graph
+
+
+def _find_path(
+    graph: dict[str, list[tuple[str, dict[str, Any]]]],
+    start: str,
+    goal: str,
+    *,
+    max_hops: int = 3,
+) -> list[dict[str, Any]]:
+    queue: list[tuple[str, list[dict[str, Any]]]] = [(start, [])]
+    visited = {start}
+    while queue:
+        current, trail = queue.pop(0)
+        if len(trail) >= max_hops:
+            continue
+        for neighbour, edge in graph.get(current, []):
+            next_trail = [*trail, edge]
+            if neighbour == goal:
+                return next_trail
+            if neighbour in visited:
+                continue
+            visited.add(neighbour)
+            queue.append((neighbour, next_trail))
+    return []
+
+
+def _multi_hop_evidence_for_claim(
+    claim_text: str,
+    evidence_packet: dict[str, Any],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    edges = _relationship_edges(evidence_packet)
+    mentioned = sorted(_mentioned_entity_names(claim_text, edges))
+    if len(mentioned) < 2:
+        return [], []
+
+    graph = _adjacency(edges)
+    for idx, source in enumerate(mentioned):
+        for target in mentioned[idx + 1 :]:
+            path = _find_path(graph, source, target)
+            if not path:
+                continue
+            bridge_names = [source]
+            spans: list[str] = []
+            citations: list[dict[str, Any]] = []
+            current = source
+            for edge in path:
+                edge_source = _edge_name(edge, "source")
+                edge_target = _edge_name(edge, "target")
+                other = edge_target if edge_source == current else edge_source
+                bridge_names.append(other)
+                span = str(edge.get("span_text") or "")
+                if span:
+                    spans.append(span)
+                citations.append(_citation_from_relationship(edge))
+                current = other
+            path_text = " -> ".join(bridge_names)
+            return (
+                [
+                    (
+                        f"Graph traversal links {source} to {target} via {path_text}. "
+                        + " ".join(spans)
+                    ).strip()
+                ],
+                _dedupe_citations(citations),
+            )
+    return [], []
+
+
+def _negative_evidence_for_claim(
+    claim_text: str,
+    evidence_packet: dict[str, Any],
+) -> list[dict[str, Any]]:
+    negatives = evidence_packet.get("negative_evidence") or []
+    matched: list[dict[str, Any]] = []
+    for item in negatives:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "")
+        if not text:
+            continue
+        if _overlap_ratio(claim_text, text) < 0.45:
+            continue
+        citation = dict(item.get("citation") or {})
+        matched.append({"text": text, "citation": citation, "kind": item.get("kind")})
+    return matched
+
+
 def _citations_for_display(citations: list[dict[str, Any]]) -> str:
     parts = []
     for citation in citations[:3]:
@@ -178,6 +364,7 @@ async def validate_claims(answer_payload: dict[str, Any]) -> dict[str, Any]:
     """Extract claims from the answer and validate each against cited evidence spans."""
     answer_text = answer_payload.get("answer", "")
     existing_claims: list[dict[str, Any]] = answer_payload.get("claims", [])
+    evidence_packet = dict(answer_payload.get("evidence_packet") or {})
 
     extracted_claim_texts = await _extract_claims_from_answer(answer_text) if answer_text else []
     has_inline_citation_markers = bool(CITATION_MARKER_RE.search(str(answer_text)))
@@ -195,7 +382,8 @@ async def validate_claims(answer_payload: dict[str, Any]) -> dict[str, Any]:
                 "unsupported_claim_count": 0,
                 "validation_skipped": True,
                 "validation_skip_reason": (
-                    "Answer already contains inline citations but no structured claim map was provided."
+                    "Answer already contains inline citations but no structured claim map "
+                    "was provided."
                 ),
             },
         }
@@ -209,9 +397,30 @@ async def validate_claims(answer_payload: dict[str, Any]) -> dict[str, Any]:
         claim_texts = extracted_claim_texts
 
     validation_coroutines = []
+    validation_inputs: list[dict[str, Any]] = []
     for claim_text in claim_texts:
-        citations = citations_by_claim.get(claim_text, [])
+        citations = list(citations_by_claim.get(claim_text, []))
         spans = [str(c.get("span_text", "")) for c in citations if c.get("span_text")]
+        path_spans, path_citations = _multi_hop_evidence_for_claim(claim_text, evidence_packet)
+        negative_matches = _negative_evidence_for_claim(claim_text, evidence_packet)
+        if path_spans:
+            spans.extend(path_spans)
+            citations.extend(path_citations)
+        if DENIAL_CLAIM_RE.search(claim_text):
+            for item in negative_matches:
+                spans.append(str(item.get("text") or ""))
+                citation = dict(item.get("citation") or {})
+                if citation:
+                    citations.append(citation)
+        citations = _dedupe_citations(citations)
+        validation_inputs.append(
+            {
+                "claim_text": claim_text,
+                "citations": citations,
+                "spans": spans,
+                "negative_evidence": negative_matches,
+            }
+        )
         validation_coroutines.append(_validate_single_claim(claim_text, spans))
 
     results = (
@@ -220,8 +429,9 @@ async def validate_claims(answer_payload: dict[str, Any]) -> dict[str, Any]:
         else []
     )
     validated: list[dict[str, Any]] = []
-    for claim_text, result in zip(claim_texts, results, strict=False):
-        citations = citations_by_claim.get(claim_text, [])
+    for validation_input, result in zip(validation_inputs, results, strict=False):
+        claim_text = validation_input["claim_text"]
+        citations = validation_input["citations"]
         if not citations:
             result = {
                 "status": "UNSUPPORTED",
@@ -236,6 +446,7 @@ async def validate_claims(answer_payload: dict[str, Any]) -> dict[str, Any]:
                 "confidence": result["confidence"],
                 "note": result.get("note"),
                 "validated": result["status"] != "UNSUPPORTED",
+                "negative_evidence": validation_input["negative_evidence"],
             }
         )
 
@@ -251,6 +462,9 @@ async def validate_claims(answer_payload: dict[str, Any]) -> dict[str, Any]:
         ),
         "unsupported_claim_count": sum(
             1 for claim in validated if claim.get("status") == "UNSUPPORTED"
+        ),
+        "negative_evidence_count": sum(
+            len(claim.get("negative_evidence", [])) for claim in validated
         ),
     }
     return {

@@ -11,6 +11,7 @@ from operation_lens_v2.ingestion.duck_store import init_db
 from operation_lens_v2.query import reranker
 from operation_lens_v2.query.parser import parse_query
 from operation_lens_v2.query.pipeline import (
+    _QUERY_CACHE,
     _query_needs_history_context,
     _resolve_recall_strategy,
     _run_inventory_query,
@@ -552,6 +553,52 @@ async def test_run_query_preserves_graph_backed_relationship_flow(tmp_path, monk
     assert result["backend"] == "local-test"
     assert result["claims"][0]["status"] == "SUPPORTED"
     assert result["top_results"][0]["source"] == "graph"
+
+
+@pytest.mark.asyncio
+async def test_run_query_reuses_cache_for_same_query_and_corpus(tmp_path, monkeypatch):
+    await close_runtime_resources()
+    _QUERY_CACHE.clear()
+    db_path = tmp_path / "query-cache.duckdb"
+    con = init_db(str(db_path))
+    monkeypatch.setattr(settings, "duckdb_path", str(db_path))
+    monkeypatch.setattr(settings, "query_cache_enabled", True)
+    monkeypatch.setattr(settings, "query_cache_max_entries", 8)
+    monkeypatch.setattr(
+        "operation_lens_v2.query.retriever_vector.retrieve_vector",
+        AsyncMock(return_value=[]),
+    )
+
+    _seed_db(con)
+    calls = {"generate": 0}
+
+    async def fake_generate_answer(packet, *, use_cloud: bool):
+        calls["generate"] += 1
+        return {
+            "backend": "local-cache-test",
+            "answer": "KEY FINDINGS\nMarcus Webb was observed at 14 Arkwright Road.",
+            "claims": [],
+        }
+
+    async def passthrough_validate(payload):
+        return {**payload, "claims": []}
+
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.llm_router.generate_answer",
+        fake_generate_answer,
+    )
+    monkeypatch.setattr(
+        "operation_lens_v2.query.pipeline.claim_validator.validate_claims",
+        passthrough_validate,
+    )
+
+    first = await run_query("Where was Marcus Webb observed?")
+    second = await run_query("  where   was marcus webb observed?  ")
+
+    assert calls["generate"] == 1
+    assert first["query_id"] != second["query_id"]
+    assert second["cache_hit"] is True
+    assert second["answer"] == first["answer"]
 
 
 @pytest.mark.asyncio

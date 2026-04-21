@@ -11,7 +11,6 @@ import pytest
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
-    TextPart,
     ToolCallPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -19,6 +18,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from operation_lens_v2.ingestion.duck_store import init_db
 from operation_lens_v2.query.investigator import (
     InvestigatorDeps,
+    InvestigatorStepHandlers,
     _select_tool_capable_investigator_model,
     build_investigator,
     investigate,
@@ -29,7 +29,6 @@ from operation_lens_v2.query.tool_schemas import (
     Citation,
     InvestigationReport,
 )
-
 
 INSERT_CASE_SQL = "INSERT INTO cases (case_id, case_ref, case_name) VALUES (?, ?, ?)"
 INSERT_DOC_SQL = (
@@ -48,6 +47,47 @@ INSERT_ALIAS_SQL = (
     "INSERT INTO entity_aliases (alias_id, entity_id, alias_text, source_doc, source_chunk)"
     " VALUES (?, ?, ?, ?, ?)"
 )
+
+
+class _FakeToolModule:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple, dict]] = []
+
+    async def search_entities(self, *args, **kwargs):
+        self.calls.append(("search_entities", args, kwargs))
+        return []
+
+    async def get_entity_profile(self, *args, **kwargs):
+        self.calls.append(("get_entity_profile", args, kwargs))
+        return None
+
+    async def get_relationships(self, *args, **kwargs):
+        self.calls.append(("get_relationships", args, kwargs))
+        return []
+
+    async def get_cooccurrence(self, *args, **kwargs):
+        self.calls.append(("get_cooccurrence", args, kwargs))
+        return []
+
+    async def get_timeline(self, *args, **kwargs):
+        self.calls.append(("get_timeline", args, kwargs))
+        return []
+
+    async def fetch_chunk(self, *args, **kwargs):
+        self.calls.append(("fetch_chunk", args, kwargs))
+        return None
+
+    async def list_documents(self, *args, **kwargs):
+        self.calls.append(("list_documents", args, kwargs))
+        return []
+
+    async def get_document_entities(self, *args, **kwargs):
+        self.calls.append(("get_document_entities", args, kwargs))
+        return []
+
+    async def walk_graph(self, *args, **kwargs):
+        self.calls.append(("walk_graph", args, kwargs))
+        return []
 
 
 @pytest.fixture
@@ -95,6 +135,42 @@ def _final_report_response() -> ModelResponse:
             )
         ]
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("handler_name", "args", "kwargs", "expected_tool"),
+    [
+        ("search_entities", ("Marcus Webb",), {"entity_type": "PERSON"}, "search_entities"),
+        ("get_entity_profile", ("e-webb",), {}, "get_entity_profile"),
+        ("get_relationships", ("e-webb",), {"depth": 2}, "get_relationships"),
+        ("get_cooccurrence", ("e-webb", "e-khalil"), {}, "get_cooccurrence"),
+        ("get_timeline", (), {"entity_ids": ["e-webb"]}, "get_timeline"),
+        ("fetch_chunk", ("chunk-1",), {}, "fetch_chunk"),
+        ("list_documents", (), {}, "list_documents"),
+        ("get_document_entities", ("doc-1",), {}, "get_document_entities"),
+        ("walk_graph", ("e-webb", "e-khalil"), {"max_hops": 3}, "walk_graph"),
+    ],
+)
+async def test_investigator_step_handlers_dispatch_each_tool(
+    handler_name,
+    args,
+    kwargs,
+    expected_tool,
+):
+    fake_tools = _FakeToolModule()
+    handlers = InvestigatorStepHandlers(tool_module=fake_tools)
+    deps = InvestigatorDeps(scope=build_scope("corpus"), duck=object())  # type: ignore[arg-type]
+
+    await getattr(handlers, handler_name)(deps, *args, **kwargs)
+
+    assert fake_tools.calls
+    tool_name, tool_args, tool_kwargs = fake_tools.calls[0]
+    assert tool_name == expected_tool
+    assert tool_args[0] is deps.scope
+    assert deps.duck in tool_args
+    for key, value in kwargs.items():
+        assert tool_kwargs[key] == value
 
 
 @pytest.mark.asyncio
@@ -194,7 +270,6 @@ async def test_agent_fetch_chunk_raises_when_chunk_out_of_scope(seeded_db):
     agent = build_investigator()
     with agent.override(model=FunctionModel(scripted_llm)):
         scope = build_scope("document", doc_id="some-other-doc")
-        deps = InvestigatorDeps(scope=scope, duck=seeded_db["con"])
         # The agent may or may not receive a retry — depending on PydanticAI
         # version it may raise UnexpectedModelBehavior. Our public `investigate`
         # helper swallows that into a LOW-confidence report.

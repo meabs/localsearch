@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -19,14 +19,18 @@ from operation_lens_v2.ingestion import (
     relationship_extractor,
     vector_store,
 )
-from operation_lens_v2.ingestion.csv_ingest import CsvIngestConfig, ingest_csv
+from operation_lens_v2.ingestion.change_detection import (
+    fingerprint_path,
+    is_unchanged,
+    latest_document_for_path,
+)
+from operation_lens_v2.ingestion.media_ingest import AUDIO_VIDEO_SUFFIXES, ingest_media
 
 logger = logging.getLogger(__name__)
 
 
-def _utc_now() -> datetime:
-    # datetime.UTC was added in 3.11 but the aliased constant is clearer.
-    return datetime.now(timezone.utc)
+def _utc_now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
 
 
 def _spans_overlap(start_a: int, end_a: int, start_b: int, end_b: int) -> bool:
@@ -67,27 +71,39 @@ async def ingest_pdf(
     resolved_case_name = case_name or case_ref.replace("_", " ").title()
     case_id = duck_store.create_case(con, case_ref=case_ref, case_name=resolved_case_name)
 
-    # Idempotency: check if this filepath was already ingested under this case.
+    fingerprint = fingerprint_path(pdf_path)
+    existing_doc = latest_document_for_path(con, filepath=str(pdf_path), case_id=case_id)
+
+    # Idempotency: hash-aware for new ingestions, with a legacy filepath fallback
+    # for documents ingested before source hashes existed.
     if not force:
-        existing = con.execute(
-            "SELECT doc_id FROM documents WHERE filepath = ? AND case_id = ?",
+        legacy_existing = con.execute(
+            (
+                "SELECT doc_id FROM documents "
+                "WHERE filepath = ? AND case_id = ? AND source_hash IS NULL"
+            ),
             [str(pdf_path), case_id],
         ).fetchone()
-        if existing:
+        if is_unchanged(existing_doc, fingerprint) or legacy_existing:
+            existing_doc_id = str(
+                (existing_doc or {}).get("doc_id")
+                or (legacy_existing[0] if legacy_existing else "")
+            )
             logger.info("Skipping already-ingested doc: %s (use force=True to re-ingest)", pdf_path)
             duck_store.record_ingestion_event(
                 con,
                 event_id=str(uuid4()),
                 case_id=case_id,
-                doc_id=existing[0],
+                doc_id=existing_doc_id,
                 source_path=str(pdf_path),
                 source_type="pdf",
                 status="skipped",
                 started_at=_utc_now(),
                 completed_at=_utc_now(),
                 duration_ms=0,
+                notes=f"source_hash={fingerprint.sha256}",
             )
-            return {"doc_id": existing[0], "case_ref": case_ref, "skipped": 1}
+            return {"doc_id": existing_doc_id, "case_ref": case_ref, "skipped": 1}
 
     event_id = str(uuid4())
     started_at = _utc_now()
@@ -102,6 +118,10 @@ async def ingest_pdf(
             case_id=case_id,
             con=con,
             vs=vs,
+            source_hash=fingerprint.sha256,
+            source_size_bytes=fingerprint.size_bytes,
+            source_mtime_ns=fingerprint.mtime_ns,
+            supersedes_doc_id=str(existing_doc["doc_id"]) if existing_doc else None,
         )
     except Exception as exc:
         duration_ms = int((perf_counter() - started_perf) * 1000)
@@ -139,6 +159,7 @@ async def ingest_pdf(
         entities_new=entities_new,
         relationships_new=relationships_new,
         ocr_used=result["ocr_used"],
+        notes=f"source_hash={fingerprint.sha256}",
     )
     result["entities_new"] = entities_new
     result["relationships_new"] = relationships_new
@@ -154,13 +175,19 @@ async def _run_pdf_ingestion(
     case_id: str,
     con,
     vs,
+    source_hash: str | None = None,
+    source_size_bytes: int | None = None,
+    source_mtime_ns: int | None = None,
+    supersedes_doc_id: str | None = None,
 ) -> dict[str, int | str | bool]:
     """Inner pipeline body — returns the legacy ingestion summary.
 
     Split out so ``ingest_pdf`` can wrap the call in an ingestion-event
     recorder without inflating the function with timing/metrics bookkeeping.
     """
-    pages, ocr_used = extractor.extract_pdf_text(pdf_path)
+    extraction = extractor.extract_pdf_text_detailed(pdf_path)
+    pages = extraction.pages
+    ocr_used = extraction.ocr_used
     duck_store.upsert_document(
         con,
         doc_id=doc_id,
@@ -169,7 +196,23 @@ async def _run_pdf_ingestion(
         page_count=len(pages),
         ocr_used=ocr_used,
         case_id=case_id,
+        source_hash=source_hash,
+        source_size_bytes=source_size_bytes,
+        source_mtime_ns=source_mtime_ns,
+        supersedes_doc_id=supersedes_doc_id,
     )
+    for quality in extraction.page_quality:
+        duck_store.upsert_page_quality(
+            con,
+            doc_id=doc_id,
+            page=quality.page,
+            extraction_method=quality.extraction_method,
+            ocr_confidence=quality.ocr_confidence,
+            needs_review=quality.needs_review,
+            redaction_count=quality.redaction_count,
+            evidence_gap=quality.evidence_gap,
+            notes=quality.notes,
+        )
     logger.info(
         "Ingesting doc=%s pages=%d ocr=%s case=%s", pdf_path.name, len(pages), ocr_used, case_ref
     )
@@ -197,7 +240,7 @@ async def _run_pdf_ingestion(
 
         canonical_id_by_surface: dict[str, str] = {}
         for entity in merged_entities:
-            canonical_id_by_surface[entity.text] = normaliser.resolve_entity(
+            resolution = normaliser.resolve_entity_with_provenance(
                 surface=entity.text,
                 entity_type=entity.entity_type,
                 con=con,
@@ -206,6 +249,7 @@ async def _run_pdf_ingestion(
                 threshold=settings.alias_threshold,
                 confidence=float(getattr(entity, "confidence", 1.0) or 1.0),
             )
+            canonical_id_by_surface[entity.text] = resolution.entity_id
 
         logger.debug("chunk=%s entities=%d", chunk.chunk_id[:8], len(merged_entities))
 
@@ -271,6 +315,7 @@ async def ingest_corpus(
             *corpus_dir.glob("*.pdf"),
             *corpus_dir.glob("*.csv"),
             *corpus_dir.glob("*.tsv"),
+            *[path for suffix in AUDIO_VIDEO_SUFFIXES for path in corpus_dir.glob(f"*{suffix}")],
         ]
     )
     if not files:
@@ -280,6 +325,13 @@ async def ingest_corpus(
     for input_path in files:
         if input_path.suffix.lower() in {".csv", ".tsv"}:
             result = await ingest_tabular(
+                input_path,
+                db_path=db_path,
+                case_ref=case_ref,
+                case_name=case_name,
+            )
+        elif input_path.suffix.lower() in AUDIO_VIDEO_SUFFIXES:
+            result = await ingest_media(
                 input_path,
                 db_path=db_path,
                 case_ref=case_ref,
@@ -305,6 +357,8 @@ async def ingest_tabular(
     case_name: str | None = None,
 ) -> dict[str, int | str]:
     """Ingest CSV/TSV content into the standard NER/relationship/vector pipeline."""
+    from operation_lens_v2.ingestion.csv_ingest import CsvIngestConfig, ingest_csv
+
     del case_name  # case naming is managed inside csv_ingest via case_ref.
     db_path = db_path or settings.duckdb_path
     con = duck_store.init_db(db_path)

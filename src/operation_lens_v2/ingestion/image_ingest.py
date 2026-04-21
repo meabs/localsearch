@@ -21,6 +21,7 @@ from operation_lens_v2.ingestion import (
     relationship_extractor,
     vector_store,
 )
+from operation_lens_v2.ingestion.change_detection import fingerprint_path
 from operation_lens_v2.models import Chunk
 
 
@@ -58,9 +59,16 @@ async def ingest_image(
         thumb_bytes_io = BytesIO()
         thumb.save(thumb_bytes_io, format="PNG")
         thumbnail_blob = thumb_bytes_io.getvalue()
-        ocr_text = extractor.ocr_image(image_copy, doc_id=doc_id, page_no=1, lang=config.ocr_lang)
+        ocr_result = extractor.ocr_image_result(
+            image_copy,
+            doc_id=doc_id,
+            page_no=1,
+            lang=config.ocr_lang,
+        )
+        ocr_text = ocr_result.text
 
     gps = extractor.read_image_gps(image_path)
+    fingerprint = fingerprint_path(image_path)
     ocr_failed = len(ocr_text.strip()) < config.min_chars
     page_text = ocr_text if ocr_text.strip() else image_path.name
     if gps is not None:
@@ -87,6 +95,20 @@ async def ingest_image(
         doc_format="image",
         thumbnail_blob=thumbnail_blob,
         ocr_failed=ocr_failed,
+        source_hash=fingerprint.sha256,
+        source_size_bytes=fingerprint.size_bytes,
+        source_mtime_ns=fingerprint.mtime_ns,
+    )
+    duck_store.upsert_page_quality(
+        con,
+        doc_id=doc_id,
+        page=1,
+        extraction_method=ocr_result.method,
+        ocr_confidence=ocr_result.confidence,
+        needs_review=ocr_result.needs_review or ocr_failed,
+        redaction_count=0,
+        evidence_gap=ocr_failed,
+        notes="image OCR below minimum text threshold" if ocr_failed else "",
     )
     duck_store.insert_chunks(con, [chunk])
 
@@ -99,7 +121,7 @@ async def ingest_image(
     merged_entities = [*rule_entities, *general_entities, *llm_entities]
     canonical_id_by_surface: dict[str, str] = {}
     for entity in merged_entities:
-        canonical_id_by_surface[entity.text] = normaliser.resolve_entity(
+        resolution = normaliser.resolve_entity_with_provenance(
             surface=entity.text,
             entity_type=entity.entity_type,
             con=con,
@@ -108,6 +130,7 @@ async def ingest_image(
             threshold=settings.alias_threshold,
             confidence=float(getattr(entity, "confidence", 1.0) or 1.0),
         )
+        canonical_id_by_surface[entity.text] = resolution.entity_id
 
     if gps is not None:
         lat, lon = gps

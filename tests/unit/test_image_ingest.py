@@ -6,6 +6,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from operation_lens_v2.ingestion import duck_store, image_ingest
+from operation_lens_v2.ingestion.extractor import OcrResult
 from operation_lens_v2.models import ExtractedEntity
 
 
@@ -19,8 +20,13 @@ async def test_ingest_image_persists_thumbnail_and_format(tmp_path: Path, monkey
 
     monkeypatch.setattr(
         image_ingest.extractor,
-        "ocr_image",
-        lambda *_args, **_kwargs: "Plate RX71 KLD at 14 Arkwright Road",
+        "ocr_image_result",
+        lambda *_args, **_kwargs: OcrResult(
+            text="Plate RX71 KLD at 14 Arkwright Road",
+            method="tesseract",
+            confidence=0.91,
+            needs_review=False,
+        ),
     )
     monkeypatch.setattr(
         image_ingest.ner_rules,
@@ -32,7 +38,11 @@ async def test_ingest_image_persists_thumbnail_and_format(tmp_path: Path, monkey
     )
     monkeypatch.setattr(image_ingest.ner_gliner, "extract_general_entities", lambda _text: [])
     monkeypatch.setattr(image_ingest.ner_llm, "extract_llm_entities", _async_empty)
-    monkeypatch.setattr(image_ingest.relationship_extractor, "extract_relationships", _async_rel_empty)
+    monkeypatch.setattr(
+        image_ingest.relationship_extractor,
+        "extract_relationships",
+        _async_rel_empty,
+    )
     monkeypatch.setattr(image_ingest.embedder, "embed_text", _async_embed)
 
     result = await image_ingest.ingest_image(
@@ -43,10 +53,16 @@ async def test_ingest_image_persists_thumbnail_and_format(tmp_path: Path, monkey
 
     con = duck_store.init_db(str(tmp_path / "evidence.duckdb"))
     row = con.execute(
-        "SELECT format, thumbnail_blob IS NOT NULL, ocr_failed FROM documents WHERE doc_id = ?",
+        """
+        SELECT format, thumbnail_blob IS NOT NULL, ocr_failed, source_hash IS NOT NULL
+        FROM documents WHERE doc_id = ?
+        """,
         [result["doc_id"]],
     ).fetchone()
-    assert row == ("image", True, False)
+    assert row == ("image", True, False, True)
+    quality = duck_store.list_page_quality(con, result["doc_id"])
+    assert quality[0]["ocr_confidence"] == pytest.approx(0.91)
+    assert quality[0]["needs_review"] is False
 
 
 async def _async_embed(_text: str) -> list[float]:

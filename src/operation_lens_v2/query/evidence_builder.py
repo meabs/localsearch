@@ -1,7 +1,46 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import uuid4
+
+DENIAL_RE = re.compile(
+    r"\b(?:denied|denies|deny|no\s+known|not\s+known|unknown\s+to|"
+    r"no\s+connection|no\s+link|unconnected|not\s+associated)\b",
+    re.IGNORECASE,
+)
+
+
+def _citation_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "doc_id": row.get("doc_id"),
+        "doc_name": row.get("doc_name"),
+        "page": row.get("page"),
+        "chunk_id": row.get("chunk_id"),
+        "span_text": row.get("span_text") or row.get("text") or "",
+    }
+
+
+def _negative_evidence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Surface explicit denials or no-link statements as first-class evidence."""
+    negatives: list[dict[str, Any]] = []
+    seen: set[tuple[Any, Any, str]] = set()
+    for row in rows:
+        text = str(row.get("span_text") or row.get("text") or "")
+        if not text or not DENIAL_RE.search(text):
+            continue
+        key = (row.get("doc_id"), row.get("page"), text)
+        if key in seen:
+            continue
+        seen.add(key)
+        negatives.append(
+            {
+                "kind": "explicit_denial",
+                "text": text,
+                "citation": _citation_from_row(row),
+            }
+        )
+    return negatives[:20]
 
 
 def build_evidence_packet(
@@ -68,4 +107,6 @@ def build_evidence_packet(
         "relationships": relationships,
         "exact_matches": exact_matches[:30],
         "chunks": chunks[:20],
+        "graph_evidence": relationships[:50],
+        "negative_evidence": _negative_evidence(ranked_results),
     }
