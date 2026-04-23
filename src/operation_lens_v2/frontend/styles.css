@@ -69,8 +69,8 @@ button, input, textarea, select { font: inherit; }
 
 /* ── Shell ─────────────────────────────────────────────────────────── */
 #shell {
-  display: grid;
-  grid-template-rows: var(--topbar-h) var(--topnav-h) 1fr;
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
 }
 
@@ -249,6 +249,7 @@ button, input, textarea, select { font: inherit; }
 
 /* ── Content area ──────────────────────────────────────────────────── */
 #content {
+  flex: 1;
   overflow: auto;
   min-height: 0;
 }
@@ -259,8 +260,8 @@ button, input, textarea, select { font: inherit; }
 
 /* ── Workspace ─────────────────────────────────────────────────────── */
 .workspace {
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 0;
   min-height: 0;
 }
@@ -357,7 +358,7 @@ button, input, textarea, select { font: inherit; }
   grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
   gap: 0;
   min-height: 0;
-  align-content: start;
+  align-items: start;
 }
 
 .graph-layout    { grid-template-columns: minmax(280px, 320px) minmax(0, 1fr); }

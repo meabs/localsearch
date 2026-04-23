@@ -22,9 +22,25 @@ no document content ever leaves the machine.
 | Get it running in 5 minutes | [Quickstart](https://github.com/meabs/localsearch#quickstart-5-minutes) |
 | Understand how it fits together | [Architecture](architecture.md) |
 | Operate a running instance | [Runbook](runbook.md) |
+| See UI screenshots | [UI screenshots](screenshots/README.md) |
 | Extend it to a new domain | [Extending the system](https://github.com/meabs/localsearch#extending-the-system) |
 | Tune settings | [Configuration reference](https://github.com/meabs/localsearch#configuration-reference) |
 | Fix something that broke | [Troubleshooting](https://github.com/meabs/localsearch#troubleshooting) |
+
+---
+
+## UI
+
+Two themes ship side-by-side — switch at runtime with the button in the top-right / bottom-right corner.
+
+| Theme | URL | Description |
+|---|---|---|
+| **New UI** | `/ui/` | Horizontal top-nav, slate-dark `#0d1117`, IBM Plex Sans body, blue `#388bfd` accent |
+| **Classic UI** | `/ui/classic.html` | Cinematic amber/space-dark palette, vertical icon sidebar |
+
+Both support hash routing: `/ui/#graph`, `/ui/#query`, `/ui/#map`, `/ui/#timeline`, `/ui/#cases`, `/ui/#audit`.
+
+See [UI screenshots](screenshots/README.md) for a full visual comparison.
 
 ---
 
@@ -57,6 +73,7 @@ and redacts span text before any external call.
 
 - [Architecture notes](architecture.md) — data stores and pipeline shape
 - [Runbook](runbook.md) — operating notes
+- [UI screenshots](screenshots/README.md) — new and classic UI side-by-side
 - [Full README on GitHub](https://github.com/meabs/localsearch#readme) — detailed reference
 
 ## License

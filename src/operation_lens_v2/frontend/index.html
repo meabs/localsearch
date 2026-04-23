@@ -648,7 +648,7 @@
         panes.forEach((p) => p.classList.remove("active"));
         const target = document.getElementById(targetId);
         if (target) target.classList.add("active");
-        const btn = document.querySelector(\`.nav-btn[data-target="\${targetId}"]\`);
+        const btn = document.querySelector('.nav-btn[data-target="' + targetId + '"]');
         if (btn) btn.classList.add("active");
         const key = Object.keys(TAB_MAP).find((k) => TAB_MAP[k] === targetId);
         if (key) history.replaceState(null, "", "#" + key);
