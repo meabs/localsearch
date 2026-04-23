@@ -1,12 +1,12 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OPERATION LENS v2 // RESTRICTED</title>
+  <title>Operation Lens v2</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -14,749 +14,616 @@
   <div id="shell">
     <header id="topbar">
       <div id="topbar-logo">
-        <span class="brand-overline">Intel fusion platform</span>
-        <strong>Operation Lens</strong>
-        <span class="brand-meta">Offline mode // local evidence workstation // v2.0</span>
-      </div>
-      <div id="topbar-status">
-        <div class="status-item">
-          <div class="status-dot"></div>
-          Local inference live
+        <div class="logo-mark">OL</div>
+        <div class="logo-text">
+          <strong>Operation Lens</strong>
+          <span class="logo-sub">v2 &middot; local evidence workstation</span>
         </div>
-        <div class="status-item" id="status-db">Evidence corpus mounted</div>
       </div>
-      <div id="topbar-timewrap">
-        <span class="topbar-time-label">London sync</span>
-        <div id="topbar-time"></div>
-      </div>
-    </header>
 
-    <div id="main">
-      <nav id="sidebar" aria-label="Workspace navigation">
-        <button class="nav-btn active" data-target="tab-graph" title="Entity Atlas">
-          <span class="nav-icon">G</span>
-          <span>Atlas</span>
+      <nav id="topnav" aria-label="Workspace navigation">
+        <button class="nav-btn active" data-target="tab-graph">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="4" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/><circle cx="16" cy="4" r="2.5" stroke="currentColor" stroke-width="1.5"/><circle cx="16" cy="16" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M6.2 9.1L13.8 5M6.2 10.9L13.8 15" stroke="currentColor" stroke-width="1.5"/></svg>
+          Entity Atlas
         </button>
-        <button class="nav-btn" data-target="tab-query" title="Query Briefing">
-          <span class="nav-icon">Q</span>
-          <span>Brief</span>
+        <button class="nav-btn" data-target="tab-query">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 5h14M3 10h9M3 15h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Query Brief
         </button>
-        <button class="nav-btn" data-target="tab-map" title="Geospatial Map">
-          <span class="nav-icon">M</span>
-          <span>Map</span>
+        <button class="nav-btn" data-target="tab-map">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2C7.24 2 5 4.24 5 7c0 3.94 5 11 5 11s5-7.06 5-11c0-2.76-2.24-5-5-5z" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="7" r="2" stroke="currentColor" stroke-width="1.5"/></svg>
+          Geo Map
         </button>
-        <div class="nav-divider"></div>
-        <button class="nav-btn" data-target="tab-timeline" title="Timeline Desk">
-          <span class="nav-icon">T</span>
-          <span>Time</span>
+        <button class="nav-btn" data-target="tab-timeline">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 10h14M3 10l4-4M3 10l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Timeline
         </button>
-        <button class="nav-btn" data-target="tab-cases" title="Case Desk">
-          <span class="nav-icon">C</span>
-          <span>Cases</span>
+        <button class="nav-btn" data-target="tab-cases">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3" y="7" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M7 7V5.5A1.5 1.5 0 018.5 4h3A1.5 1.5 0 0113 5.5V7" stroke="currentColor" stroke-width="1.5"/></svg>
+          Cases
         </button>
-        <button class="nav-btn" data-target="tab-audit" title="Ingest Audit">
-          <span class="nav-icon">I</span>
-          <span>Ingest</span>
+        <button class="nav-btn" data-target="tab-audit">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 6h12M4 10h8M4 14h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="15.5" cy="13.5" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M17 15l1.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Ingest Audit
         </button>
       </nav>
 
-      <div id="content">
-        <section id="tab-graph" class="tab-pane active">
-          <div class="workspace">
-            <div class="workspace-head workspace-head-atlas">
-              <div class="workspace-head-copy">
-                <div class="workspace-kicker">Section 01 // Entity Graph</div>
-                <div class="workspace-brandline">Operation Lens</div>
-                <h1 class="section-title">Entity Relationship Atlas</h1>
-                <p class="section-desc">
-                  A cinematic overview of people, places, vehicles, and organisations pulled into the same evidentiary field.
-                  Start from a subject and expand outward to expose the strongest connected actors.
-                </p>
-              </div>
-              <div class="head-metrics">
-                <div class="metric-card">
-                  <div class="metric-label">View</div>
-                  <div class="metric-value">Graph</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Mode</div>
-                  <div class="metric-value">2 Hops</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Render</div>
-                  <div class="metric-value">Local</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="workspace-body graph-layout">
-              <div id="graph-left" class="side-panel">
-                <div class="panel-card">
-                  <div class="card-pad">
-                    <div class="panel-titlebar">
-                      <div>
-                        <div id="graph-panel-overline" class="panel-overline">Entity seed</div>
-                        <div id="graph-panel-title" class="panel-title">Expand a network</div>
-                        <p id="graph-panel-copy" class="panel-copy">Use a person, alias, location, or asset to build an operational map around it.</p>
-                      </div>
-                      <div id="graph-panel-chip" class="panel-chip">Atlas query</div>
-                    </div>
-
-                    <form id="graph-form">
-                      <div class="field-group">
-                        <label class="field-label" for="graph-mode-select">Graph type</label>
-                        <select id="graph-mode-select">
-                          <option value="entity">Entity relationship graph</option>
-                          <option value="media">Media object graph</option>
-                        </select>
-                      </div>
-                      <div class="field-group">
-                        <label class="field-label" for="graph-case-select">Operation</label>
-                        <select id="graph-case-select">
-                          <option value="">All operations</option>
-                        </select>
-                      </div>
-                      <div class="field-group" style="margin-top:12px;">
-                        <label class="field-label" for="graph-entity-input">Subject query</label>
-                        <input type="text" id="graph-entity-input" placeholder="e.g. Marcus Webb" />
-                      </div>
-                      <button id="graph-submit-btn" type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
-                        Expand network
-                      </button>
-                    </form>
-                  </div>
-                </div>
-
-                <div class="panel-card tall">
-                  <div class="card-pad">
-                    <div class="panel-titlebar">
-                      <div>
-                        <div class="panel-overline">Node dossier</div>
-                        <div class="panel-title">Relationship detail</div>
-                        <p class="panel-copy compact-copy">Click a node or edge to inspect details.</p>
-                      </div>
-                      <div class="panel-chip">Evidence</div>
-                    </div>
-                  </div>
-                  <div id="node-detail">
-                    <div class="node-empty">Select a node or edge to inspect the connected record.</div>
-                  </div>
-                </div>
-              </div>
-
-              <div id="graph-right" class="canvas-stack">
-                <div class="canvas-frame">
-                  <div class="canvas-header">
-                    <div class="canvas-title">Network projection</div>
-                    <div id="graph-canvas-status" class="canvas-status">Weighted by mentions and confidence</div>
-                  </div>
-                  <div id="graph-layout-toolbar">
-                    <label>Layout
-                      <select id="graph-layout-select">
-                        <option value="fcose">fcose</option>
-                        <option value="cose-bilkent">cose-bilkent</option>
-                        <option value="dagre">dagre</option>
-                        <option value="concentric">concentric</option>
-                        <option value="circle">circle</option>
-                        <option value="breadthfirst">breadthfirst</option>
-                      </select>
-                    </label>
-                    <label>Confidence <input id="graph-confidence" type="range" min="0" max="1" step="0.05" value="0.35" /></label>
-                    <label><input id="graph-cross-doc-toggle" type="checkbox" checked /> Cross-doc</label>
-                    <button id="graph-relayout-btn" type="button">Re-layout</button>
-                    <button id="graph-fit-btn" type="button">Fit</button>
-                  </div>
-                  <div id="cy"></div>
-                  <div id="cy-overlay">Local render</div>
-                </div>
-
-                <div id="graph-legend" class="panel-card">
-                  <div class="legend-item"><div class="legend-dot" style="background:#3a72c8;"></div>Person</div>
-                  <div class="legend-item"><div class="legend-dot" style="background:#1a9a8a;"></div>Location</div>
-                  <div class="legend-item"><div class="legend-dot" style="background:#c96a00;"></div>Vehicle</div>
-                  <div class="legend-item"><div class="legend-dot" style="background:#7a4ab0;"></div>Organisation</div>
-                  <div class="legend-item"><div class="legend-dot" style="background:#5a8a7a;"></div>Other</div>
-                  <div class="legend-item">Cross-document links highlighted</div>
-                </div>
-
-                <div id="graph-insights" class="panel-card">
-                  <div class="card-pad">
-                    <div class="panel-titlebar">
-                      <div>
-                        <div class="panel-overline">Investigator tools</div>
-                        <div class="panel-title">Path finder &amp; network insights</div>
-                        <p class="panel-copy">Trace the strongest evidence-backed chain between two entities, or see who brokers the network.</p>
-                      </div>
-                      <div class="panel-chip">Phase 08</div>
-                    </div>
-
-                    <div class="insights-filters">
-                      <div class="field-group insights-filter-field">
-                        <label class="field-label" for="insights-min-confidence">Min confidence</label>
-                        <input type="number" id="insights-min-confidence" min="0" max="1" step="0.05" value="0.5" />
-                      </div>
-                      <div class="field-group insights-filter-field insights-filter-wide">
-                        <label class="field-label" for="insights-exclude-types">Exclude relation types (CSV)</label>
-                        <input type="text" id="insights-exclude-types" placeholder="MENTIONED_WITH" value="MENTIONED_WITH" />
-                      </div>
-                    </div>
-
-                    <form id="path-finder-form">
-                      <div class="field-group">
-                        <label class="field-label" for="path-source">Source</label>
-                        <input type="text" id="path-source" placeholder="e.g. Marcus Webb" />
-                      </div>
-                      <div class="field-group">
-                        <label class="field-label" for="path-target">Target</label>
-                        <input type="text" id="path-target" placeholder="e.g. Rania Khalil" />
-                      </div>
-                      <button type="submit" class="btn btn-primary" style="width:100%;">Find shortest paths</button>
-                    </form>
-                    <div id="path-finder-results" class="path-results">
-                      <div class="node-empty">Enter two entities to see the top 3 evidence-weighted paths.</div>
-                    </div>
-
-                    <div class="insights-divider"></div>
-
-                    <div class="insights-subhead">
-                      <div>
-                        <div class="panel-overline">Centrality</div>
-                        <div class="panel-title">Most connected actors</div>
-                      </div>
-                      <div class="insights-actions">
-                        <select id="centrality-metric">
-                          <option value="degree">Degree</option>
-                          <option value="betweenness">Betweenness</option>
-                          <option value="pagerank">PageRank</option>
-                        </select>
-                        <button type="button" id="centrality-refresh" class="btn btn-secondary">Refresh</button>
-                      </div>
-                    </div>
-                    <div id="centrality-results" class="centrality-results">
-                      <div class="node-empty">Loading...</div>
-                    </div>
-
-                    <div class="insights-divider"></div>
-
-                    <div class="insights-subhead">
-                      <div>
-                        <div class="panel-overline">Communities</div>
-                        <div class="panel-title">Louvain clusters</div>
-                      </div>
-                      <div class="insights-actions">
-                        <button type="button" id="community-refresh" class="btn btn-secondary">Refresh</button>
-                      </div>
-                    </div>
-                    <div id="community-results" class="community-results">
-                      <div class="node-empty">Loading...</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="tab-query" class="tab-pane">
-          <div class="workspace">
-            <div class="workspace-head">
-              <div>
-                <div class="workspace-kicker">Section 02</div>
-                <h1 class="section-title">Evidence Query Briefing</h1>
-                <p class="section-desc">
-                  Submit an investigative question and receive a structured briefing, claim-by-claim validation, and the exact
-                  retrieval snippets behind the response.
-                </p>
-              </div>
-              <div class="head-metrics">
-                <div class="metric-card">
-                  <div class="metric-label">Output</div>
-                  <div class="metric-value">Brief</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Claims</div>
-                  <div class="metric-value">Scored</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Sources</div>
-                  <div class="metric-value">Exact</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="workspace-body query-layout">
-              <div id="query-left" class="side-panel">
-                <div class="panel-card">
-                  <div class="card-pad">
-                    <div class="panel-titlebar">
-                      <div>
-                        <div class="panel-overline">Query setup</div>
-                        <div class="panel-title">Build a question</div>
-                        <p class="panel-copy">Phrase your prompt the way an analyst would ask for a case briefing or link analysis.</p>
-                      </div>
-                      <div class="panel-chip">Grounded only</div>
-                    </div>
-
-                    <form id="query-form">
-                      <div class="field-group">
-                        <label class="field-label" for="query-template-select">Saved template</label>
-                        <select id="query-template-select">
-                          <option value="">Choose saved template (optional)</option>
-                        </select>
-                      </div>
-
-                      <div class="field-group">
-                        <label class="field-label" for="query-input">Investigative query</label>
-                        <textarea id="query-input" rows="4" placeholder="What connects Marcus Webb to Rania Khalil?"></textarea>
-                      </div>
-
-                      <div class="field-group">
-                        <span class="field-label">Investigation scope</span>
-                        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;">
-                          <label><input type="radio" name="query-scope" value="corpus" checked /> Corpus</label>
-                          <label><input type="radio" name="query-scope" value="case" /> Case</label>
-                          <label><input type="radio" name="query-scope" value="document" /> Document</label>
-                        </div>
-                      </div>
-
-                      <div class="field-group">
-                        <label class="field-label" for="case-input">Case scope</label>
-                        <input type="text" id="case-input" placeholder="e.g. OP_NIGHTFALL (optional)" />
-                      </div>
-
-                      <div class="field-group">
-                        <label class="field-label" for="doc-id-input">Document ID</label>
-                        <input type="text" id="doc-id-input" placeholder="e.g. doc-123 (for document scope)" />
-                      </div>
-
-                      <div class="field-group">
-                        <label class="field-label" for="recall-mode-select">Hybrid search mode</label>
-                        <select id="recall-mode-select">
-                          <option value="auto">Auto (recommended)</option>
-                          <option value="fast">Fast / focused</option>
-                          <option value="balanced">Balanced recall</option>
-                          <option value="exhaustive">Exhaustive recall</option>
-                        </select>
-                      </div>
-
-                      <div class="toggle-row">
-                        <div class="toggle-meta">
-                          <span class="toggle-label">Cloud reasoning</span>
-                          <span class="toggle-copy">Use only when broader reasoning is worth the additional processing path.</span>
-                        </div>
-                        <label class="toggle-switch">
-                          <input type="checkbox" id="cloud-toggle" />
-                          <div class="toggle-track"></div>
-                        </label>
-                      </div>
-
-                      <div id="cloud-warn">
-                        Cloud mode keeps raw document text local and only forwards structured evidence and metadata.
-                      </div>
-
-                      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
-                        Run briefing
-                      </button>
-                    </form>
-                  </div>
-                </div>
-
-                <div id="claims-panel" class="panel-card tall">
-                  <div id="claims-header">Claim validation matrix</div>
-                  <div id="claims">
-                    <div class="timeline-empty">Submit a query to score the returned claims.</div>
-                  </div>
-                </div>
-              </div>
-
-              <div id="query-right" class="panel-column">
-                <div class="panel-card tall">
-                  <div class="panel-banner">Assessment narrative</div>
-                  <div id="answer-panel">
-                    <div class="query-chat-toolbar">
-                      <div class="query-chat-title">RAG chat transcript</div>
-                      <button type="button" id="chat-reset-btn" class="btn">Clear chat</button>
-                    </div>
-                    <div id="query-chat-thread">
-                      <div class="timeline-empty">No prior turns yet. Ask your first question.</div>
-                    </div>
-                    <div id="answer">
-                      <div class="timeline-empty">Your structured assessment will appear here after the first query.</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="panel-card">
-                  <div class="panel-banner">Source evidence extracts</div>
-                  <div id="evidence-chunks">
-                    <div class="timeline-empty">Evidence excerpts will populate here once a response is grounded.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="tab-map" class="tab-pane">
-          <div class="workspace">
-            <div class="workspace-head">
-              <div>
-                <div class="workspace-kicker">Section 03</div>
-                <h1 class="section-title">Geospatial Map</h1>
-                <p class="section-desc">
-                  Every geocoded location across the corpus plotted on the ground. Filter by case, toggle satellite imagery,
-                  and click pins to see the documents that reference each site.
-                </p>
-              </div>
-              <div class="head-metrics">
-                <div class="metric-card">
-                  <div class="metric-label">Layer</div>
-                  <div class="metric-value">OSM / ESRI</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Pins</div>
-                  <div class="metric-value" id="map-pin-count">0</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Case</div>
-                  <div class="metric-value" id="map-case-label">All</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="workspace-body map-layout">
-              <div id="map-left" class="side-panel">
-                <div class="panel-card">
-                  <div class="card-pad">
-                    <div class="panel-titlebar">
-                      <div>
-                        <div class="panel-overline">Scope</div>
-                        <div class="panel-title">Filter pins</div>
-                        <p class="panel-copy">Narrow to a single operation, or show the full corpus on one map.</p>
-                      </div>
-                      <div class="panel-chip">Geocoded</div>
-                    </div>
-                  </div>
-                  <div class="card-pad">
-                    <div class="field-group">
-                      <label class="field-label" for="map-case-input">Case</label>
-                      <select id="map-case-input">
-                        <option value="">All cases</option>
-                      </select>
-                    </div>
-                    <div class="field-group">
-                      <label class="field-label" for="map-layer-toggle">Basemap</label>
-                      <div class="lens-map-toggle" id="map-layer-toggle" style="display:flex;gap:4px;">
-                        <button type="button" data-layer="street" class="active">Street</button>
-                        <button type="button" data-layer="satellite">Satellite</button>
-                      </div>
-                    </div>
-                    <button id="map-refresh" class="btn btn-primary">Refresh pins</button>
-                    <p id="map-hint" class="panel-copy" style="margin-top:12px;">
-                      Missing a location? Open it in the Atlas detail panel and click LOCATE to geocode via Nominatim.
-                    </p>
-                  </div>
-                </div>
-
-                <div class="panel-card">
-                  <div class="card-pad">
-                    <div class="panel-titlebar">
-                      <div>
-                        <div class="panel-overline">Pin dossier</div>
-                        <div class="panel-title">Selection</div>
-                        <p class="panel-copy">Click a pin to see the documents that reference this location.</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="card-pad" id="map-selection">
-                    <div class="node-empty">No pin selected.</div>
-                  </div>
-                </div>
-              </div>
-
-              <div id="map-right" class="panel-column">
-                <div class="panel-card tall">
-                  <div id="map-canvas" style="width:100%;height:72vh;background:#0a131c;"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="tab-timeline" class="tab-pane">
-          <div class="workspace">
-            <div class="workspace-head">
-              <div>
-                <div class="workspace-kicker">Section 03</div>
-                <h1 class="section-title">Chronology Desk</h1>
-                <p class="section-desc">
-                  Filter by entity or document and turn the corpus into a clean dated sequence for briefings, handoffs, and
-                  investigative reconstruction.
-                </p>
-              </div>
-              <div class="head-metrics">
-                <div class="metric-card">
-                  <div class="metric-label">Order</div>
-                  <div class="metric-value">Dated</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Focus</div>
-                  <div class="metric-value">Entity</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Output</div>
-                  <div class="metric-value">Sequence</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="workspace-body timeline-layout">
-              <div id="timeline-left" class="side-panel">
-                <div class="panel-card">
-                  <div class="card-pad">
-                    <div class="panel-titlebar">
-                      <div>
-                        <div class="panel-overline">Timeline filter</div>
-                        <div class="panel-title">Scope the record</div>
-                        <p class="panel-copy">Target a specific actor or constrain the chronology to selected documents.</p>
-                      </div>
-                      <div class="panel-chip">Date extracted</div>
-                    </div>
-                  </div>
-
-                  <div id="timeline-controls">
-                    <div class="field-group">
-                      <label class="field-label" for="timeline-entity">Entity filter</label>
-                      <input type="text" id="timeline-entity" placeholder="e.g. Marcus Webb" />
-                    </div>
-                    <div class="field-group">
-                      <label class="field-label" for="timeline-doc-ids">Document IDs</label>
-                      <input type="text" id="timeline-doc-ids" placeholder="comma-separated (optional)" />
-                    </div>
-                    <button id="timeline-submit" class="btn btn-primary">Load timeline</button>
-                  </div>
-                </div>
-              </div>
-
-              <div id="timeline-right" class="panel-column">
-                <div class="panel-card tall">
-                  <div id="timeline-status">Ready. Apply filters to build the chronology.</div>
-                  <div id="timeline-container">
-                    <div class="timeline-empty">No events loaded yet. Apply filters and load the timeline.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="tab-cases" class="tab-pane">
-          <div class="workspace">
-            <div class="workspace-head">
-              <div>
-                <div class="workspace-kicker">Section 04</div>
-                <h1 class="section-title">Case Intake Desk</h1>
-                <p class="section-desc">
-                  Create a case record, upload PDF evidence directly from the browser, and keep a visible register of what has
-                  been attached to each case.
-                </p>
-              </div>
-              <div class="head-metrics">
-                <div class="metric-card">
-                  <div class="metric-label">Intake</div>
-                  <div class="metric-value">Direct</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Storage</div>
-                  <div class="metric-value">Local</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Evidence</div>
-                  <div class="metric-value">PDF</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="workspace-body cases-layout">
-              <div class="side-panel">
-                <div class="panel-card">
-                  <div class="card-pad">
-                    <div class="panel-titlebar">
-                      <div>
-                        <div class="panel-overline">Case registry</div>
-                        <div class="panel-title">Create a case</div>
-                        <p class="panel-copy">Add the case reference once, then reuse it for uploads and scoped querying.</p>
-                      </div>
-                      <div class="panel-chip">Structured</div>
-                    </div>
-
-                    <form id="case-create-form">
-                      <div class="field-group">
-                        <label class="field-label" for="case-create-ref">Case reference</label>
-                        <input type="text" id="case-create-ref" placeholder="e.g. OP_NIGHTFALL" />
-                      </div>
-                      <div class="field-group">
-                        <label class="field-label" for="case-create-name">Case name</label>
-                        <input type="text" id="case-create-name" placeholder="e.g. Operation Nightfall" />
-                      </div>
-                      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
-                        Create case
-                      </button>
-                    </form>
-                    <div id="case-create-status" class="inline-status inline-status-muted">Ready to register a case.</div>
-                  </div>
-                </div>
-
-                <div class="panel-card">
-                  <div class="card-pad">
-                    <div class="panel-titlebar">
-                      <div>
-                        <div class="panel-overline">Evidence intake</div>
-                        <div class="panel-title">Upload case documents</div>
-                        <p class="panel-copy">Choose a case, then upload documents, images, tables, email exports, or media files for local ingestion.</p>
-                      </div>
-                      <div class="panel-chip">Evidence</div>
-                    </div>
-
-                    <form id="case-upload-form">
-                      <div id="case-upload-dropzone" class="entity-attach-dropzone" style="margin-bottom:12px;">
-                        <span>Drop files here: PDF, image, audio/video, CSV, email (.eml/.msg), email-thread Parquet.</span>
-                      </div>
-                      <div class="field-group">
-                        <label class="field-label" for="case-upload-select">Target case</label>
-                        <select id="case-upload-select"></select>
-                      </div>
-                      <div class="field-group">
-                        <label class="field-label" for="case-upload-file">Document</label>
-                        <input type="file" id="case-upload-file" accept="application/pdf,.pdf,image/png,.png,image/jpeg,.jpg,.jpeg,image/bmp,.bmp,image/tiff,.tif,.tiff,audio/aac,.aac,audio/aiff,.aiff,audio/flac,.flac,audio/m4a,.m4a,audio/mpeg,.mp3,audio/ogg,.ogg,audio/wav,.wav,audio/x-ms-wma,.wma,video/avi,.avi,video/mp4,.mp4,video/mpeg,.mpeg,.mpg,video/quicktime,.mov,video/webm,.webm,video/x-matroska,.mkv,text/csv,.csv,text/tab-separated-values,.tsv,application/octet-stream,.parquet" />
-                      </div>
-                      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
-                        Upload and ingest
-                      </button>
-                    </form>
-                    <div id="case-upload-status" class="inline-status inline-status-muted">Choose a case and an evidence file to begin.</div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="panel-column">
-                <div class="panel-card tall">
-                  <div id="case-list-header">Case register</div>
-                  <div id="case-list" class="case-list">
-                    <div class="timeline-empty">Cases will appear here once loaded.</div>
-                  </div>
-                </div>
-
-                <div class="panel-card tall">
-                  <div id="case-documents-header">Case documents</div>
-                  <div id="case-documents" class="case-documents">
-                    <div class="timeline-empty">Select a case to review its uploaded evidence.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="tab-audit" class="tab-pane">
-          <div class="workspace">
-            <div class="workspace-head">
-              <div>
-                <div class="workspace-kicker">Section 05</div>
-                <h1 class="section-title">Ingest Audit</h1>
-                <p class="section-desc">
-                  Every document ingested, the metadata captured for it, and the entities the extractor proposed.
-                  Low-confidence candidates are flagged so you can confirm and add them to the graph â€” or leave them aside.
-                </p>
-              </div>
-              <div class="head-metrics">
-                <div class="metric-card">
-                  <div class="metric-label">Records</div>
-                  <div class="metric-value" id="audit-event-count">0</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Low conf</div>
-                  <div class="metric-value" id="audit-low-count">0</div>
-                </div>
-                <div class="metric-card">
-                  <div class="metric-label">Threshold</div>
-                  <div class="metric-value" id="audit-threshold">0.50</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="workspace-body cases-layout">
-              <div class="side-panel">
-                <div class="panel-card">
-                  <div class="card-pad">
-                    <div class="panel-titlebar">
-                      <div>
-                        <div class="panel-overline">Filters</div>
-                        <div class="panel-title">Scope ingestion log</div>
-                        <p class="panel-copy">Filter by case or status. Newest events appear first.</p>
-                      </div>
-                      <div class="panel-chip">Audit</div>
-                    </div>
-                    <form id="audit-filter-form">
-                      <div class="field-group">
-                        <label class="field-label" for="audit-case-select">Case</label>
-                        <select id="audit-case-select">
-                          <option value="">All cases</option>
-                        </select>
-                      </div>
-                      <div class="field-group">
-                        <label class="field-label" for="audit-status-select">Status</label>
-                        <select id="audit-status-select">
-                          <option value="">Any</option>
-                          <option value="success">Success</option>
-                          <option value="failed">Failed</option>
-                          <option value="skipped">Skipped</option>
-                        </select>
-                      </div>
-                      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
-                        Reload ingestions
-                      </button>
-                    </form>
-                    <div id="audit-filter-status" class="inline-status inline-status-muted">Loading ingestion history...</div>
-                  </div>
-                </div>
-
-                <div class="panel-card tall">
-                  <div id="audit-list-header" style="padding:14px 18px;border-bottom:1px solid var(--border-0);">
-                    Ingestion log
-                  </div>
-                  <div id="audit-list" class="case-list">
-                    <div class="timeline-empty">Ingestion events will appear here once they load.</div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="panel-column">
-                <div class="panel-card tall">
-                  <div id="audit-detail-header" style="padding:14px 18px;border-bottom:1px solid var(--border-0);">
-                    Ingestion detail
-                  </div>
-                  <div id="audit-detail" class="case-documents">
-                    <div class="timeline-empty">Select an ingestion on the left to inspect its metadata.</div>
-                  </div>
-                </div>
-
-                <div class="panel-card tall">
-                  <div id="audit-entities-header" style="padding:14px 18px;border-bottom:1px solid var(--border-0);display:flex;align-items:center;justify-content:space-between;gap:12px;">
-                    <span>Extracted entities</span>
-                    <span id="audit-entities-summary" style="font-size:0.75rem;color:var(--ink-faint);"></span>
-                  </div>
-                  <div id="audit-entities" class="case-documents">
-                    <div class="timeline-empty">Entities extracted for the selected ingestion will appear here.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+      <div id="topbar-right">
+        <div class="status-pill">
+          <div class="status-dot"></div>
+          Inference live
+        </div>
+        <div class="status-pill" id="status-db">Corpus mounted</div>
+        <div id="topbar-time"></div>
+        <a href="/ui/classic.html" class="switch-ui-link" title="Switch to classic UI">Classic UI</a>
       </div>
-    </div>
-  </div>
+    </header>
+
+    <div id="content">
+
+      <!-- Entity Atlas -->
+      <section id="tab-graph" class="tab-pane active">
+        <div class="workspace">
+          <div class="page-head">
+            <div class="page-head-left">
+              <span class="page-tag">Atlas</span>
+              <h1 class="page-title">Entity Relationship Atlas</h1>
+              <p class="page-desc">Map people, places, vehicles and organisations across the evidentiary corpus. Expand from any subject to expose connected actors.</p>
+            </div>
+            <div class="page-metrics">
+              <div class="metric-card"><div class="metric-label">View</div><div class="metric-value">Graph</div></div>
+              <div class="metric-card"><div class="metric-label">Mode</div><div class="metric-value">2 Hops</div></div>
+              <div class="metric-card"><div class="metric-label">Render</div><div class="metric-value">Local</div></div>
+            </div>
+          </div>
+
+          <div class="workspace-body graph-layout">
+            <div id="graph-left" class="side-panel">
+              <div class="panel-card">
+                <div class="card-pad">
+                  <div class="panel-titlebar">
+                    <div>
+                      <div id="graph-panel-overline" class="panel-overline">Entity seed</div>
+                      <div id="graph-panel-title" class="panel-title">Expand a network</div>
+                      <p id="graph-panel-copy" class="panel-copy">Use a person, alias, location, or asset to build an operational map.</p>
+                    </div>
+                    <div id="graph-panel-chip" class="panel-chip">Atlas query</div>
+                  </div>
+                  <form id="graph-form">
+                    <div class="field-group">
+                      <label class="field-label" for="graph-mode-select">Graph type</label>
+                      <select id="graph-mode-select">
+                        <option value="entity">Entity relationship graph</option>
+                        <option value="media">Media object graph</option>
+                      </select>
+                    </div>
+                    <div class="field-group">
+                      <label class="field-label" for="graph-case-select">Operation</label>
+                      <select id="graph-case-select"><option value="">All operations</option></select>
+                    </div>
+                    <div class="field-group" style="margin-top:12px;">
+                      <label class="field-label" for="graph-entity-input">Subject query</label>
+                      <input type="text" id="graph-entity-input" placeholder="e.g. Marcus Webb" />
+                    </div>
+                    <button id="graph-submit-btn" type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">Expand network</button>
+                  </form>
+                </div>
+              </div>
+
+              <div class="panel-card tall">
+                <div class="card-pad">
+                  <div class="panel-titlebar">
+                    <div>
+                      <div class="panel-overline">Node dossier</div>
+                      <div class="panel-title">Relationship detail</div>
+                      <p class="panel-copy compact-copy">Click a node or edge to inspect details.</p>
+                    </div>
+                    <div class="panel-chip">Evidence</div>
+                  </div>
+                </div>
+                <div id="node-detail"><div class="node-empty">Select a node or edge to inspect the connected record.</div></div>
+              </div>
+            </div>
+
+            <div id="graph-right" class="canvas-stack">
+              <div class="canvas-frame">
+                <div class="canvas-header">
+                  <div class="canvas-title">Network projection</div>
+                  <div id="graph-canvas-status" class="canvas-status">Weighted by mentions and confidence</div>
+                </div>
+                <div id="graph-layout-toolbar">
+                  <label>Layout
+                    <select id="graph-layout-select">
+                      <option value="fcose">fcose</option>
+                      <option value="cose-bilkent">cose-bilkent</option>
+                      <option value="dagre">dagre</option>
+                      <option value="concentric">concentric</option>
+                      <option value="circle">circle</option>
+                      <option value="breadthfirst">breadthfirst</option>
+                    </select>
+                  </label>
+                  <label>Confidence <input id="graph-confidence" type="range" min="0" max="1" step="0.05" value="0.35" /></label>
+                  <label><input id="graph-cross-doc-toggle" type="checkbox" checked /> Cross-doc</label>
+                  <button id="graph-relayout-btn" type="button">Re-layout</button>
+                  <button id="graph-fit-btn" type="button">Fit</button>
+                </div>
+                <div id="cy"></div>
+                <div id="cy-overlay">Local render</div>
+              </div>
+
+              <div id="graph-legend" class="panel-card">
+                <div class="legend-item"><div class="legend-dot" style="background:#3a72c8;"></div>Person</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#1a9a8a;"></div>Location</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#c96a00;"></div>Vehicle</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#7a4ab0;"></div>Organisation</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#5a8a7a;"></div>Other</div>
+                <div class="legend-item">Cross-document links highlighted</div>
+              </div>
+
+              <div id="graph-insights" class="panel-card">
+                <div class="card-pad">
+                  <div class="panel-titlebar">
+                    <div>
+                      <div class="panel-overline">Investigator tools</div>
+                      <div class="panel-title">Path finder &amp; network insights</div>
+                      <p class="panel-copy">Trace the strongest evidence chain between two entities, or see who brokers the network.</p>
+                    </div>
+                    <div class="panel-chip">Phase 08</div>
+                  </div>
+
+                  <div class="insights-filters">
+                    <div class="field-group insights-filter-field">
+                      <label class="field-label" for="insights-min-confidence">Min confidence</label>
+                      <input type="number" id="insights-min-confidence" min="0" max="1" step="0.05" value="0.5" />
+                    </div>
+                    <div class="field-group insights-filter-field insights-filter-wide">
+                      <label class="field-label" for="insights-exclude-types">Exclude relation types (CSV)</label>
+                      <input type="text" id="insights-exclude-types" placeholder="MENTIONED_WITH" value="MENTIONED_WITH" />
+                    </div>
+                  </div>
+
+                  <form id="path-finder-form">
+                    <div class="field-group">
+                      <label class="field-label" for="path-source">Source</label>
+                      <input type="text" id="path-source" placeholder="e.g. Marcus Webb" />
+                    </div>
+                    <div class="field-group">
+                      <label class="field-label" for="path-target">Target</label>
+                      <input type="text" id="path-target" placeholder="e.g. Rania Khalil" />
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width:100%;">Find shortest paths</button>
+                  </form>
+                  <div id="path-finder-results" class="path-results">
+                    <div class="node-empty">Enter two entities to see the top 3 evidence-weighted paths.</div>
+                  </div>
+
+                  <div class="insights-divider"></div>
+
+                  <div class="insights-subhead">
+                    <div>
+                      <div class="panel-overline">Centrality</div>
+                      <div class="panel-title">Most connected actors</div>
+                    </div>
+                    <div class="insights-actions">
+                      <select id="centrality-metric">
+                        <option value="degree">Degree</option>
+                        <option value="betweenness">Betweenness</option>
+                        <option value="pagerank">PageRank</option>
+                      </select>
+                      <button type="button" id="centrality-refresh" class="btn btn-secondary">Refresh</button>
+                    </div>
+                  </div>
+                  <div id="centrality-results" class="centrality-results">
+                    <div class="node-empty">Loading...</div>
+                  </div>
+
+                  <div class="insights-divider"></div>
+
+                  <div class="insights-subhead">
+                    <div>
+                      <div class="panel-overline">Communities</div>
+                      <div class="panel-title">Louvain clusters</div>
+                    </div>
+                    <div class="insights-actions">
+                      <button type="button" id="community-refresh" class="btn btn-secondary">Refresh</button>
+                    </div>
+                  </div>
+                  <div id="community-results" class="community-results">
+                    <div class="node-empty">Loading...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Query Brief -->
+      <section id="tab-query" class="tab-pane">
+        <div class="workspace">
+          <div class="page-head">
+            <div class="page-head-left">
+              <span class="page-tag">Query</span>
+              <h1 class="page-title">Evidence Query Briefing</h1>
+              <p class="page-desc">Submit an investigative question and receive a structured briefing, claim-by-claim validation, and exact retrieval snippets.</p>
+            </div>
+            <div class="page-metrics">
+              <div class="metric-card"><div class="metric-label">Output</div><div class="metric-value">Brief</div></div>
+              <div class="metric-card"><div class="metric-label">Claims</div><div class="metric-value">Scored</div></div>
+              <div class="metric-card"><div class="metric-label">Sources</div><div class="metric-value">Exact</div></div>
+            </div>
+          </div>
+
+          <div class="workspace-body query-layout">
+            <div id="query-left" class="side-panel">
+              <div class="panel-card">
+                <div class="card-pad">
+                  <div class="panel-titlebar">
+                    <div>
+                      <div class="panel-overline">Query setup</div>
+                      <div class="panel-title">Build a question</div>
+                      <p class="panel-copy">Phrase your prompt the way an analyst would ask for a case briefing.</p>
+                    </div>
+                    <div class="panel-chip">Grounded only</div>
+                  </div>
+
+                  <form id="query-form">
+                    <div class="field-group">
+                      <label class="field-label" for="query-template-select">Saved template</label>
+                      <select id="query-template-select"><option value="">Choose saved template (optional)</option></select>
+                    </div>
+                    <div class="field-group">
+                      <label class="field-label" for="query-input">Investigative query</label>
+                      <textarea id="query-input" rows="4" placeholder="What connects Marcus Webb to Rania Khalil?"></textarea>
+                    </div>
+                    <div class="field-group">
+                      <span class="field-label">Investigation scope</span>
+                      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;">
+                        <label><input type="radio" name="query-scope" value="corpus" checked /> Corpus</label>
+                        <label><input type="radio" name="query-scope" value="case" /> Case</label>
+                        <label><input type="radio" name="query-scope" value="document" /> Document</label>
+                      </div>
+                    </div>
+                    <div class="field-group">
+                      <label class="field-label" for="case-input">Case scope</label>
+                      <input type="text" id="case-input" placeholder="e.g. OP_NIGHTFALL (optional)" />
+                    </div>
+                    <div class="field-group">
+                      <label class="field-label" for="doc-id-input">Document ID</label>
+                      <input type="text" id="doc-id-input" placeholder="e.g. doc-123 (for document scope)" />
+                    </div>
+                    <div class="field-group">
+                      <label class="field-label" for="recall-mode-select">Hybrid search mode</label>
+                      <select id="recall-mode-select">
+                        <option value="auto">Auto (recommended)</option>
+                        <option value="fast">Fast / focused</option>
+                        <option value="balanced">Balanced recall</option>
+                        <option value="exhaustive">Exhaustive recall</option>
+                      </select>
+                    </div>
+                    <div class="toggle-row">
+                      <div class="toggle-meta">
+                        <span class="toggle-label">Cloud reasoning</span>
+                        <span class="toggle-copy">Use only when broader reasoning is worth the additional processing path.</span>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="cloud-toggle" />
+                        <div class="toggle-track"></div>
+                      </label>
+                    </div>
+                    <div id="cloud-warn">Cloud mode keeps raw document text local and only forwards structured evidence and metadata.</div>
+                    <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">Run briefing</button>
+                  </form>
+                </div>
+              </div>
+
+              <div id="claims-panel" class="panel-card tall">
+                <div id="claims-header">Claim validation matrix</div>
+                <div id="claims"><div class="timeline-empty">Submit a query to score the returned claims.</div></div>
+              </div>
+            </div>
+
+            <div id="query-right" class="panel-column">
+              <div class="panel-card tall">
+                <div class="panel-banner">Assessment narrative</div>
+                <div id="answer-panel">
+                  <div class="query-chat-toolbar">
+                    <div class="query-chat-title">RAG chat transcript</div>
+                    <button type="button" id="chat-reset-btn" class="btn">Clear chat</button>
+                  </div>
+                  <div id="query-chat-thread"><div class="timeline-empty">No prior turns yet. Ask your first question.</div></div>
+                  <div id="answer"><div class="timeline-empty">Your structured assessment will appear here after the first query.</div></div>
+                </div>
+              </div>
+              <div class="panel-card">
+                <div class="panel-banner">Source evidence extracts</div>
+                <div id="evidence-chunks"><div class="timeline-empty">Evidence excerpts will populate here once a response is grounded.</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Geo Map -->
+      <section id="tab-map" class="tab-pane">
+        <div class="workspace">
+          <div class="page-head">
+            <div class="page-head-left">
+              <span class="page-tag">Map</span>
+              <h1 class="page-title">Geospatial Map</h1>
+              <p class="page-desc">Every geocoded location across the corpus plotted on the ground. Filter by case and click pins to see referencing documents.</p>
+            </div>
+            <div class="page-metrics">
+              <div class="metric-card"><div class="metric-label">Layer</div><div class="metric-value">OSM / ESRI</div></div>
+              <div class="metric-card"><div class="metric-label">Pins</div><div class="metric-value" id="map-pin-count">0</div></div>
+              <div class="metric-card"><div class="metric-label">Case</div><div class="metric-value" id="map-case-label">All</div></div>
+            </div>
+          </div>
+
+          <div class="workspace-body map-layout">
+            <div id="map-left" class="side-panel">
+              <div class="panel-card">
+                <div class="card-pad">
+                  <div class="panel-titlebar">
+                    <div>
+                      <div class="panel-overline">Scope</div>
+                      <div class="panel-title">Filter pins</div>
+                      <p class="panel-copy">Narrow to a single operation, or show the full corpus on one map.</p>
+                    </div>
+                    <div class="panel-chip">Geocoded</div>
+                  </div>
+                </div>
+                <div class="card-pad">
+                  <div class="field-group">
+                    <label class="field-label" for="map-case-input">Case</label>
+                    <select id="map-case-input"><option value="">All cases</option></select>
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label" for="map-layer-toggle">Basemap</label>
+                    <div class="lens-map-toggle" id="map-layer-toggle" style="display:flex;gap:4px;">
+                      <button type="button" data-layer="street" class="active">Street</button>
+                      <button type="button" data-layer="satellite">Satellite</button>
+                    </div>
+                  </div>
+                  <button id="map-refresh" class="btn btn-primary">Refresh pins</button>
+                  <p id="map-hint" class="panel-copy" style="margin-top:12px;">
+                    Missing a location? Open it in the Atlas detail panel and click LOCATE to geocode via Nominatim.
+                  </p>
+                </div>
+              </div>
+              <div class="panel-card">
+                <div class="card-pad">
+                  <div class="panel-titlebar">
+                    <div>
+                      <div class="panel-overline">Pin dossier</div>
+                      <div class="panel-title">Selection</div>
+                      <p class="panel-copy">Click a pin to see the documents that reference this location.</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-pad" id="map-selection"><div class="node-empty">No pin selected.</div></div>
+              </div>
+            </div>
+            <div id="map-right" class="panel-column">
+              <div class="panel-card tall">
+                <div id="map-canvas" style="width:100%;height:72vh;background:#0d1117;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Timeline -->
+      <section id="tab-timeline" class="tab-pane">
+        <div class="workspace">
+          <div class="page-head">
+            <div class="page-head-left">
+              <span class="page-tag">Timeline</span>
+              <h1 class="page-title">Chronology Desk</h1>
+              <p class="page-desc">Filter by entity or document and turn the corpus into a clean dated sequence for briefings and investigative reconstruction.</p>
+            </div>
+            <div class="page-metrics">
+              <div class="metric-card"><div class="metric-label">Order</div><div class="metric-value">Dated</div></div>
+              <div class="metric-card"><div class="metric-label">Focus</div><div class="metric-value">Entity</div></div>
+              <div class="metric-card"><div class="metric-label">Output</div><div class="metric-value">Sequence</div></div>
+            </div>
+          </div>
+
+          <div class="workspace-body timeline-layout">
+            <div id="timeline-left" class="side-panel">
+              <div class="panel-card">
+                <div class="card-pad">
+                  <div class="panel-titlebar">
+                    <div>
+                      <div class="panel-overline">Timeline filter</div>
+                      <div class="panel-title">Scope the record</div>
+                      <p class="panel-copy">Target a specific actor or constrain the chronology to selected documents.</p>
+                    </div>
+                    <div class="panel-chip">Date extracted</div>
+                  </div>
+                </div>
+                <div id="timeline-controls">
+                  <div class="field-group">
+                    <label class="field-label" for="timeline-entity">Entity filter</label>
+                    <input type="text" id="timeline-entity" placeholder="e.g. Marcus Webb" />
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label" for="timeline-doc-ids">Document IDs</label>
+                    <input type="text" id="timeline-doc-ids" placeholder="comma-separated (optional)" />
+                  </div>
+                  <button id="timeline-submit" class="btn btn-primary">Load timeline</button>
+                </div>
+              </div>
+            </div>
+            <div id="timeline-right" class="panel-column">
+              <div class="panel-card tall">
+                <div id="timeline-status">Ready. Apply filters to build the chronology.</div>
+                <div id="timeline-container"><div class="timeline-empty">No events loaded yet. Apply filters and load the timeline.</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Cases -->
+      <section id="tab-cases" class="tab-pane">
+        <div class="workspace">
+          <div class="page-head">
+            <div class="page-head-left">
+              <span class="page-tag">Cases</span>
+              <h1 class="page-title">Case Intake Desk</h1>
+              <p class="page-desc">Create a case record, upload PDF evidence, and keep a visible register of what has been attached to each case.</p>
+            </div>
+            <div class="page-metrics">
+              <div class="metric-card"><div class="metric-label">Intake</div><div class="metric-value">Direct</div></div>
+              <div class="metric-card"><div class="metric-label">Storage</div><div class="metric-value">Local</div></div>
+              <div class="metric-card"><div class="metric-label">Evidence</div><div class="metric-value">PDF</div></div>
+            </div>
+          </div>
+
+          <div class="workspace-body cases-layout">
+            <div class="side-panel">
+              <div class="panel-card">
+                <div class="card-pad">
+                  <div class="panel-titlebar">
+                    <div>
+                      <div class="panel-overline">Case registry</div>
+                      <div class="panel-title">Create a case</div>
+                      <p class="panel-copy">Add the case reference once, then reuse it for uploads and scoped querying.</p>
+                    </div>
+                    <div class="panel-chip">Structured</div>
+                  </div>
+                  <form id="case-create-form">
+                    <div class="field-group">
+                      <label class="field-label" for="case-create-ref">Case reference</label>
+                      <input type="text" id="case-create-ref" placeholder="e.g. OP_NIGHTFALL" />
+                    </div>
+                    <div class="field-group">
+                      <label class="field-label" for="case-create-name">Case name</label>
+                      <input type="text" id="case-create-name" placeholder="e.g. Operation Nightfall" />
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">Create case</button>
+                  </form>
+                  <div id="case-create-status" class="inline-status inline-status-muted">Ready to register a case.</div>
+                </div>
+              </div>
+
+              <div class="panel-card">
+                <div class="card-pad">
+                  <div class="panel-titlebar">
+                    <div>
+                      <div class="panel-overline">Evidence intake</div>
+                      <div class="panel-title">Upload case documents</div>
+                      <p class="panel-copy">Choose a case, then upload documents, images, tables, email exports, or media files.</p>
+                    </div>
+                    <div class="panel-chip">Evidence</div>
+                  </div>
+                  <form id="case-upload-form">
+                    <div id="case-upload-dropzone" class="entity-attach-dropzone" style="margin-bottom:12px;">
+                      <span>Drop files here: PDF, image, audio/video, CSV, email (.eml/.msg), email-thread Parquet.</span>
+                    </div>
+                    <div class="field-group">
+                      <label class="field-label" for="case-upload-select">Target case</label>
+                      <select id="case-upload-select"></select>
+                    </div>
+                    <div class="field-group">
+                      <label class="field-label" for="case-upload-file">Document</label>
+                      <input type="file" id="case-upload-file" accept="application/pdf,.pdf,image/png,.png,image/jpeg,.jpg,.jpeg,image/bmp,.bmp,image/tiff,.tif,.tiff,audio/aac,.aac,audio/aiff,.aiff,audio/flac,.flac,audio/m4a,.m4a,audio/mpeg,.mp3,audio/ogg,.ogg,audio/wav,.wav,audio/x-ms-wma,.wma,video/avi,.avi,video/mp4,.mp4,video/mpeg,.mpeg,.mpg,video/quicktime,.mov,video/webm,.webm,video/x-matroska,.mkv,text/csv,.csv,text/tab-separated-values,.tsv,application/octet-stream,.parquet" />
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">Upload and ingest</button>
+                  </form>
+                  <div id="case-upload-status" class="inline-status inline-status-muted">Choose a case and an evidence file to begin.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel-column">
+              <div class="panel-card tall">
+                <div id="case-list-header">Case register</div>
+                <div id="case-list" class="case-list"><div class="timeline-empty">Cases will appear here once loaded.</div></div>
+              </div>
+              <div class="panel-card tall">
+                <div id="case-documents-header">Case documents</div>
+                <div id="case-documents" class="case-documents"><div class="timeline-empty">Select a case to review its uploaded evidence.</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Ingest Audit -->
+      <section id="tab-audit" class="tab-pane">
+        <div class="workspace">
+          <div class="page-head">
+            <div class="page-head-left">
+              <span class="page-tag">Audit</span>
+              <h1 class="page-title">Ingest Audit</h1>
+              <p class="page-desc">Every document ingested, its metadata, and the entities the extractor proposed. Low-confidence candidates are flagged for confirmation.</p>
+            </div>
+            <div class="page-metrics">
+              <div class="metric-card"><div class="metric-label">Records</div><div class="metric-value" id="audit-event-count">0</div></div>
+              <div class="metric-card"><div class="metric-label">Low conf</div><div class="metric-value" id="audit-low-count">0</div></div>
+              <div class="metric-card"><div class="metric-label">Threshold</div><div class="metric-value" id="audit-threshold">0.50</div></div>
+            </div>
+          </div>
+
+          <div class="workspace-body cases-layout">
+            <div class="side-panel">
+              <div class="panel-card">
+                <div class="card-pad">
+                  <div class="panel-titlebar">
+                    <div>
+                      <div class="panel-overline">Filters</div>
+                      <div class="panel-title">Scope ingestion log</div>
+                      <p class="panel-copy">Filter by case or status. Newest events appear first.</p>
+                    </div>
+                    <div class="panel-chip">Audit</div>
+                  </div>
+                  <form id="audit-filter-form">
+                    <div class="field-group">
+                      <label class="field-label" for="audit-case-select">Case</label>
+                      <select id="audit-case-select"><option value="">All cases</option></select>
+                    </div>
+                    <div class="field-group">
+                      <label class="field-label" for="audit-status-select">Status</label>
+                      <select id="audit-status-select">
+                        <option value="">Any</option>
+                        <option value="success">Success</option>
+                        <option value="failed">Failed</option>
+                        <option value="skipped">Skipped</option>
+                      </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">Reload ingestions</button>
+                  </form>
+                  <div id="audit-filter-status" class="inline-status inline-status-muted">Loading ingestion history...</div>
+                </div>
+              </div>
+
+              <div class="panel-card tall">
+                <div id="audit-list-header" style="padding:14px 18px;border-bottom:1px solid var(--border);">Ingestion log</div>
+                <div id="audit-list" class="case-list"><div class="timeline-empty">Ingestion events will appear here once they load.</div></div>
+              </div>
+            </div>
+
+            <div class="panel-column">
+              <div class="panel-card tall">
+                <div id="audit-detail-header" style="padding:14px 18px;border-bottom:1px solid var(--border);">Ingestion detail</div>
+                <div id="audit-detail" class="case-documents"><div class="timeline-empty">Select an ingestion on the left to inspect its metadata.</div></div>
+              </div>
+              <div class="panel-card tall">
+                <div id="audit-entities-header" style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                  <span>Extracted entities</span>
+                  <span id="audit-entities-summary" style="font-size:0.75rem;color:var(--text-muted);"></span>
+                </div>
+                <div id="audit-entities" class="case-documents"><div class="timeline-empty">Entities extracted for the selected ingestion will appear here.</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- #content -->
+  </div><!-- #shell -->
 
   <script>
     (function () {
@@ -772,17 +639,27 @@
 
   <script>
     (function () {
+      const TAB_MAP = { graph:"tab-graph", query:"tab-query", map:"tab-map", timeline:"tab-timeline", cases:"tab-cases", audit:"tab-audit" };
       const btns = document.querySelectorAll(".nav-btn[data-target]");
       const panes = document.querySelectorAll(".tab-pane");
+
+      function activateTarget(targetId) {
+        btns.forEach((b) => b.classList.remove("active"));
+        panes.forEach((p) => p.classList.remove("active"));
+        const target = document.getElementById(targetId);
+        if (target) target.classList.add("active");
+        const btn = document.querySelector('.nav-btn[data-target="' + targetId + '"]');
+        if (btn) btn.classList.add("active");
+        const key = Object.keys(TAB_MAP).find((k) => TAB_MAP[k] === targetId);
+        if (key) history.replaceState(null, "", "#" + key);
+      }
+
       btns.forEach((btn) => {
-        btn.addEventListener("click", () => {
-          btns.forEach((b) => b.classList.remove("active"));
-          panes.forEach((p) => p.classList.remove("active"));
-          btn.classList.add("active");
-          const target = document.getElementById(btn.dataset.target);
-          if (target) target.classList.add("active");
-        });
+        btn.addEventListener("click", () => activateTarget(btn.dataset.target));
       });
+
+      const hash = location.hash.replace("#", "");
+      if (hash && TAB_MAP[hash]) activateTarget(TAB_MAP[hash]);
     })();
   </script>
 
