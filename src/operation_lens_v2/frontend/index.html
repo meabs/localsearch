@@ -8,9 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Public+Sans:wght@400;500;600;700&family=Source+Serif+4:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260424-light-refresh" />
 </head>
-<body>
+<body data-theme="light">
   <div id="shell">
     <header id="topbar">
       <div id="topbar-logo">
@@ -38,6 +38,8 @@
         <div id="topbar-time"></div>
       </div>
       <div id="topbar-actions">
+        <button type="button" class="workspace-link workspace-link-strong" id="report-workspace-link">Open reporting workspace</button>
+        <button type="button" class="workspace-link workspace-link-muted" id="theme-toggle" aria-pressed="false">Use dark theme</button>
         <a class="workspace-link" href="/ui/legacy.html">Open legacy workspace</a>
       </div>
     </header>
@@ -301,13 +303,54 @@
 
             <div class="workspace-body query-layout">
               <div id="query-left" class="side-panel">
+                <div class="panel-card report-launchpad">
+                  <div class="card-pad">
+                    <div class="panel-titlebar">
+                      <div>
+                        <div class="panel-overline">Reporting workspace</div>
+                        <div class="panel-title">Generate a full case intelligence report</div>
+                        <p class="panel-copy">
+                          Build a detailed pack for professional review with a narrative briefing, chronology, graph metrics,
+                          community clusters, central actors, and a document register in one run.
+                        </p>
+                      </div>
+                      <div class="panel-chip">Case-wide</div>
+                    </div>
+
+                    <div class="report-launch-grid">
+                      <div class="report-launch-feature">
+                        <strong>Narrative brief</strong>
+                        <span>Structured intelligence summary suitable for handover and decision support.</span>
+                      </div>
+                      <div class="report-launch-feature">
+                        <strong>Timeline and graph</strong>
+                        <span>Chronology, centrality, communities, and network metrics from the current case.</span>
+                      </div>
+                      <div class="report-launch-feature">
+                        <strong>Evidence register</strong>
+                        <span>Key claims, cited supporting extracts, and a reusable markdown download.</span>
+                      </div>
+                    </div>
+
+                    <div class="report-launch-callout">
+                      <div>
+                        <div class="panel-overline">How to run it</div>
+                        <p class="panel-copy compact-copy">
+                          Keep the scope on <strong>Case</strong>, enter the case reference, then use the dedicated report action below.
+                        </p>
+                      </div>
+                      <button type="button" id="report-shortcut-btn" class="btn btn-primary">Generate case report</button>
+                    </div>
+                  </div>
+                </div>
+
                 <div class="panel-card">
                   <div class="card-pad">
                     <div class="panel-titlebar">
                       <div>
                         <div class="panel-overline">Query setup</div>
-                        <div class="panel-title">Build a query</div>
-                        <p class="panel-copy">Phrase the prompt as a briefing request, intelligence question, or link-analysis task.</p>
+                        <div class="panel-title">Briefing and query builder</div>
+                        <p class="panel-copy">Use this for ad hoc questions, short briefings, or the full case report workflow.</p>
                       </div>
                       <div class="panel-chip">Grounded only</div>
                     </div>
@@ -781,6 +824,44 @@
 
   <script>
     (function () {
+      const body = document.body;
+      const toggle = document.getElementById("theme-toggle");
+      const storageKey = "lens-theme";
+
+      function applyTheme(theme) {
+        const nextTheme = theme === "dark" ? "dark" : "light";
+        body.dataset.theme = nextTheme;
+        if (toggle) {
+          const dark = nextTheme === "dark";
+          toggle.textContent = dark ? "Use light theme" : "Use dark theme";
+          toggle.setAttribute("aria-pressed", dark ? "true" : "false");
+        }
+      }
+
+      let stored = "light";
+      try {
+        stored = window.localStorage.getItem(storageKey) || "light";
+      } catch (_) {
+        stored = "light";
+      }
+      applyTheme(stored);
+
+      if (toggle) {
+        toggle.addEventListener("click", () => {
+          const next = body.dataset.theme === "dark" ? "light" : "dark";
+          applyTheme(next);
+          try {
+            window.localStorage.setItem(storageKey, next);
+          } catch (_) {
+            // Ignore storage failures and keep the in-memory theme.
+          }
+        });
+      }
+    })();
+  </script>
+
+  <script>
+    (function () {
       const el = document.getElementById("topbar-time");
       function tick() {
         const now = new Date();
@@ -788,6 +869,40 @@
       }
       tick();
       setInterval(tick, 1000);
+    })();
+  </script>
+
+  <script>
+    (function () {
+      const reportWorkspaceLink = document.getElementById("report-workspace-link");
+      const reportShortcutButton = document.getElementById("report-shortcut-btn");
+      const caseReportButton = document.getElementById("case-report-btn");
+      const caseScopeInput = document.getElementById("case-input");
+      const scopeCase = document.querySelector('input[name="query-scope"][value="case"]');
+      const queryNav = document.querySelector('.nav-btn[data-target="tab-query"]');
+
+      function focusReportWorkflow() {
+        if (queryNav) queryNav.click();
+        if (window.location.hash !== "#query") {
+          window.location.hash = "query";
+        }
+        if (scopeCase) scopeCase.checked = true;
+        if (caseScopeInput) {
+          caseScopeInput.focus();
+          caseScopeInput.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+
+      if (reportWorkspaceLink) {
+        reportWorkspaceLink.addEventListener("click", focusReportWorkflow);
+      }
+
+      if (reportShortcutButton && caseReportButton) {
+        reportShortcutButton.addEventListener("click", () => {
+          focusReportWorkflow();
+          window.requestAnimationFrame(() => caseReportButton.click());
+        });
+      }
     })();
   </script>
 
