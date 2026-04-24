@@ -8,6 +8,7 @@ import json
 import logging
 import re
 from collections import OrderedDict
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from operation_lens_v2.config import settings
@@ -28,6 +29,8 @@ from operation_lens_v2.query.scope import ScopeContext, build_scope
 from operation_lens_v2.query.tool_schemas import InvestigationReport
 from operation_lens_v2.query.writer import compose_briefing
 from operation_lens_v2.runtime import StageTimer, get_duck_connection
+from operation_lens_v2.services.graph_algorithms import centrality_report, detect_communities
+from operation_lens_v2.services.graph_backend import DuckDBGraphBackend, EdgeFilter
 from operation_lens_v2.store import get_graph_backend
 
 logger = logging.getLogger(__name__)
@@ -1154,6 +1157,225 @@ def _claims_from_report(report: InvestigationReport) -> list[dict[str, object]]:
     return claims
 
 
+def _case_report_prompt(case_ref: str, case_name: str | None, prompt: str | None = None) -> str:
+    if prompt and prompt.strip():
+        return prompt.strip()
+    case_label = f"{case_ref} ({case_name})" if case_name else case_ref
+    return (
+        f"Generate a full intelligence report for case {case_label}. "
+        "Use the full case scope and produce: an executive assessment; the key actors, organisations, "
+        "locations, vehicles, phones, and assets; the strongest cross-document links; a chronological "
+        "timeline of material events; evidential caveats; and recommended next investigative actions. "
+        "Prioritise supported findings and cite concrete evidence."
+    )
+
+
+def _case_report_metrics(con, *, case_id: str) -> dict[str, int]:
+    documents = con.execute(
+        "SELECT count(*) FROM documents WHERE case_id = ?",
+        [case_id],
+    ).fetchone()[0]
+    entities = con.execute(
+        """
+        SELECT count(DISTINCT ea.entity_id)
+        FROM entity_aliases ea
+        JOIN documents d ON d.doc_id = ea.source_doc
+        WHERE d.case_id = ?
+        """,
+        [case_id],
+    ).fetchone()[0]
+    relationships = con.execute(
+        """
+        SELECT count(DISTINCT re.rel_id)
+        FROM relationship_evidence re
+        JOIN documents d ON d.doc_id = re.doc_id
+        WHERE d.case_id = ?
+        """,
+        [case_id],
+    ).fetchone()[0]
+    locations = con.execute(
+        """
+        SELECT count(DISTINCT ea.entity_id)
+        FROM entity_aliases ea
+        JOIN documents d ON d.doc_id = ea.source_doc
+        JOIN entities e ON e.entity_id = ea.entity_id
+        WHERE d.case_id = ? AND upper(e.entity_type) = 'LOCATION'
+        """,
+        [case_id],
+    ).fetchone()[0]
+    return {
+        "documents": int(documents or 0),
+        "entities": int(entities or 0),
+        "relationships": int(relationships or 0),
+        "locations": int(locations or 0),
+    }
+
+
+def _case_report_documents(con, *, case_id: str, limit: int = 24) -> list[dict[str, object]]:
+    rows = con.execute(
+        """
+        SELECT
+          d.doc_id,
+          d.filename,
+          d.page_count,
+          count(c.chunk_id) AS chunk_count,
+          count(DISTINCT ea.entity_id) AS entity_count
+        FROM documents d
+        LEFT JOIN chunks c ON c.doc_id = d.doc_id
+        LEFT JOIN entity_aliases ea ON ea.source_doc = d.doc_id
+        WHERE d.case_id = ?
+        GROUP BY d.doc_id, d.filename, d.page_count
+        ORDER BY d.filename
+        LIMIT ?
+        """,
+        [case_id, max(1, limit)],
+    ).fetchall()
+    return [
+        {
+            "doc_id": row[0],
+            "filename": row[1],
+            "page_count": int(row[2] or 0),
+            "chunk_count": int(row[3] or 0),
+            "entity_count": int(row[4] or 0),
+        }
+        for row in rows
+    ]
+
+
+def _case_report_timeline(report: InvestigationReport) -> list[dict[str, object]]:
+    events = []
+    for event in report.timeline[:20]:
+        events.append(
+            {
+                "event_time": event.event_time,
+                "text": event.text,
+                "doc_id": event.doc_id,
+                "doc_name": event.doc_name,
+                "page": event.page,
+                "chunk_id": event.chunk_id,
+            }
+        )
+    return events
+
+
+def _case_graph_pack(con, *, case_id: str) -> dict[str, object]:
+    backend = DuckDBGraphBackend(con)
+    edge_filter = EdgeFilter(
+        case_id=case_id,
+        min_confidence=0.35,
+        exclude_relation_types=("MENTIONED_WITH",),
+    )
+    snapshot = backend.build_snapshot(edge_filter)
+    centrality = centrality_report(
+        backend,
+        edge_filter=edge_filter,
+        metric="pagerank",
+        top_n=8,
+    )
+    communities = detect_communities(
+        backend,
+        edge_filter=edge_filter,
+        resolution=1.0,
+        max_communities=6,
+    )
+    return {
+        "graph_metrics": {
+            "node_count": int(snapshot.graph.number_of_nodes()),
+            "edge_count": int(snapshot.graph.number_of_edges()),
+        },
+        "centrality": centrality.get("entities", []),
+        "communities": communities.get("communities", []),
+        "modularity": communities.get("modularity", 0.0),
+    }
+
+
+def _case_report_markdown(
+    *,
+    case_ref: str,
+    case_name: str | None,
+    generated_at: str,
+    answer: str,
+    metrics: dict[str, int],
+    documents: list[dict[str, object]],
+    graph_pack: dict[str, object],
+    timeline: list[dict[str, object]],
+    report: InvestigationReport,
+) -> str:
+    lines = [
+        f"# Case Intelligence Report: {case_ref}",
+        "",
+        f"- Generated: {generated_at}",
+        f"- Case reference: {case_ref}",
+        f"- Case name: {case_name or 'Unknown'}",
+        f"- Documents indexed: {metrics['documents']}",
+        f"- Entities indexed: {metrics['entities']}",
+        f"- Relationships indexed: {metrics['relationships']}",
+        f"- Locations indexed: {metrics['locations']}",
+        "",
+        "## Executive Briefing",
+        "",
+        answer.strip(),
+        "",
+        "## Graph Overview",
+        "",
+        f"- Nodes in filtered graph: {graph_pack['graph_metrics']['node_count']}",
+        f"- Edges in filtered graph: {graph_pack['graph_metrics']['edge_count']}",
+        f"- Community modularity: {graph_pack.get('modularity', 0.0)}",
+        "",
+        "### Central Actors",
+        "",
+    ]
+    for entity in graph_pack.get("centrality", [])[:8]:
+        lines.append(
+            f"- {entity.get('canonical_name') or entity.get('entity_id')} "
+            f"({entity.get('entity_type', '?')}) score {entity.get('score', 0)}"
+        )
+    if not graph_pack.get("centrality"):
+        lines.append("- No centrality data available.")
+
+    lines.extend(["", "### Communities", ""])
+    for community in graph_pack.get("communities", [])[:6]:
+        members = ", ".join(
+            member.get("canonical_name") or member.get("entity_id")
+            for member in community.get("members", [])[:6]
+        )
+        lines.append(
+            f"- Cluster {community.get('community_id', 0) + 1}: "
+            f"{community.get('size', 0)} members. {members}"
+        )
+    if not graph_pack.get("communities"):
+        lines.append("- No community clusters available.")
+
+    lines.extend(["", "## Timeline", ""])
+    for event in timeline[:20]:
+        cite = ""
+        if event.get("doc_name") or event.get("doc_id"):
+            cite = f" [{event.get('doc_name') or event.get('doc_id')}, p.{event.get('page') or '?'}]"
+        lines.append(f"- {event.get('event_time')}: {event.get('text')}{cite}")
+    if not timeline:
+        lines.append("- No dated events were extracted for this case report.")
+
+    lines.extend(["", "## Key Facts", ""])
+    for fact in report.key_facts[:12]:
+        lines.append(
+            f"- {fact.subject} {fact.predicate} {fact.object} "
+            f"[{fact.citation.doc_name or fact.citation.doc_id}, p.{fact.citation.page}]"
+        )
+    if not report.key_facts:
+        lines.append("- No atomic facts extracted.")
+
+    lines.extend(["", "## Document Register", ""])
+    for document in documents[:24]:
+        lines.append(
+            f"- {document['filename']} ({document['page_count']} pages, "
+            f"{document['chunk_count']} chunks, {document['entity_count']} entities)"
+        )
+    if not documents:
+        lines.append("- No documents indexed for this case.")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 async def run_investigator_query(
     query_text: str,
     *,
@@ -1232,6 +1454,120 @@ async def run_investigator_query(
             "answer": answer,
             "claims": claims,
             "report": report.model_dump(),
+            "result_count": len(report.key_facts),
+            "top_results": [],
+        }
+    finally:
+        timer.log_summary()
+
+
+async def run_case_intelligence_report(
+    case_ref: str,
+    *,
+    prompt: str | None = None,
+) -> dict[str, object]:
+    """Generate a full case-wide intelligence report pack."""
+    normalized_case_ref = (case_ref or "").strip()
+    if not normalized_case_ref:
+        raise ValueError("case_ref is required for a case intelligence report")
+
+    timer = StageTimer(label=f"case_report:{normalized_case_ref}")
+    con = get_duck_connection(settings.duckdb_path)
+    case_row = con.execute(
+        "SELECT case_id, case_name FROM cases WHERE lower(case_ref) = lower(?)",
+        [normalized_case_ref],
+    ).fetchone()
+    if not case_row:
+        raise ValueError(f"unknown case_ref: {normalized_case_ref}")
+    case_id = str(case_row[0])
+    case_name = str(case_row[1]) if case_row[1] else None
+    report_query = _case_report_prompt(normalized_case_ref, case_name, prompt)
+
+    with timer.measure("build_scope"):
+        scope: ScopeContext = build_scope("case", case_scope=normalized_case_ref)
+
+    try:
+        with timer.measure("investigate"):
+            report = await investigate(report_query, scope, con)
+        doc_name_map = _enrich_report_with_doc_names(report, con)
+        with timer.measure("compose_briefing"):
+            answer = await compose_briefing(report, report_query)
+        answer = _rewrite_doc_ids_in_text(answer, doc_name_map)
+
+        with timer.measure("case_pack"):
+            metrics = _case_report_metrics(con, case_id=case_id)
+            documents = _case_report_documents(con, case_id=case_id)
+            graph_pack = _case_graph_pack(con, case_id=case_id)
+            timeline = _case_report_timeline(report)
+            generated_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+            markdown = _case_report_markdown(
+                case_ref=normalized_case_ref,
+                case_name=case_name,
+                generated_at=generated_at,
+                answer=answer,
+                metrics=metrics,
+                documents=documents,
+                graph_pack=graph_pack,
+                timeline=timeline,
+                report=report,
+            )
+
+        query_id = str(uuid4())
+        claims = _claims_from_report(report)
+        with timer.measure("persist_answer"):
+            con.execute(
+                (
+                    "INSERT INTO queries "
+                    "(query_id, query_text, intent, llm_backend) "
+                    "VALUES (?, ?, ?, ?)"
+                ),
+                [query_id, report_query, "case_intelligence_report", "local-investigator"],
+            )
+            for claim in claims:
+                con.execute(
+                    """
+                    INSERT INTO answer_spans (
+                      span_id, query_id, claim_text, supporting_evidence, confidence, validated
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        str(uuid4()),
+                        query_id,
+                        claim["text"],
+                        [f"{c['doc_id']}:{c['page']}" for c in claim["citations"]],
+                        claim["confidence"],
+                        True,
+                    ],
+                )
+
+        report_pack = {
+            "generated_at": generated_at,
+            "case_ref": normalized_case_ref,
+            "case_name": case_name,
+            "metrics": metrics,
+            "documents": documents,
+            "graph_metrics": graph_pack["graph_metrics"],
+            "centrality": graph_pack["centrality"],
+            "communities": graph_pack["communities"],
+            "modularity": graph_pack["modularity"],
+            "timeline": timeline,
+            "markdown": markdown,
+        }
+        return {
+            "query_id": query_id,
+            "intent": "case_intelligence_report",
+            "entities": [],
+            "entities_resolved": [],
+            "case_scope": normalized_case_ref,
+            "backend": "local-investigator",
+            "recall_mode": "case-report",
+            "scope": "case",
+            "scope_label": scope.describe(),
+            "answer": answer,
+            "claims": claims,
+            "report": report.model_dump(),
+            "report_pack": report_pack,
             "result_count": len(report.key_facts),
             "top_results": [],
         }

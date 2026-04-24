@@ -30,6 +30,11 @@ class QueryRequest(BaseModel):
     case_scope: str | None = None
 
 
+class CaseReportRequest(BaseModel):
+    case_ref: str
+    prompt: str | None = None
+
+
 class CreateCaseRequest(BaseModel):
     case_ref: str
     case_name: str

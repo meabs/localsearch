@@ -3,76 +3,61 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Operation Lens Investigator Workspace</title>
+  <title>Operation Lens Legacy Workspace</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Public+Sans:wght@400;500;600;700&family=Source+Serif+4:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="legacy.css" />
 </head>
 <body>
   <div id="shell">
     <header id="topbar">
       <div id="topbar-logo">
-        <span class="brand-overline">Investigator workspace</span>
+        <span class="brand-overline">Intel fusion platform</span>
         <strong>Operation Lens</strong>
-        <span class="brand-meta">Evidence review, search, mapping, and case management in one local-first workstation.</span>
+        <span class="brand-meta">Offline mode // local evidence workstation // v2.0</span>
       </div>
       <div id="topbar-status">
         <div class="status-item">
           <div class="status-dot"></div>
-          <div class="status-copy">
-            <span class="status-label">Inference</span>
-            <strong>Local services ready</strong>
-          </div>
+          Local inference live
         </div>
-        <div class="status-item" id="status-db">
-          <div class="status-copy">
-            <span class="status-label">Evidence</span>
-            <strong>Corpus connected</strong>
-          </div>
-        </div>
+        <div class="status-item" id="status-db">Evidence corpus mounted</div>
       </div>
       <div id="topbar-timewrap">
-        <span class="topbar-time-label">Workspace clock</span>
+        <span class="topbar-time-label">London sync</span>
         <div id="topbar-time"></div>
-      </div>
-      <div id="topbar-actions">
-        <a class="workspace-link" href="/ui/legacy.html">Open legacy workspace</a>
       </div>
     </header>
 
     <div id="main">
       <nav id="sidebar" aria-label="Workspace navigation">
-        <button class="nav-btn active" data-target="tab-graph" title="Network analysis">
-          <span class="nav-icon">1</span>
-          <span>Network analysis</span>
+        <button class="nav-btn active" data-target="tab-graph" title="Entity Atlas">
+          <span class="nav-icon">G</span>
+          <span>Atlas</span>
         </button>
-        <button class="nav-btn" data-target="tab-query" title="Questioning and briefing">
-          <span class="nav-icon">2</span>
-          <span>Questioning</span>
+        <button class="nav-btn" data-target="tab-query" title="Query Briefing">
+          <span class="nav-icon">Q</span>
+          <span>Brief</span>
         </button>
-        <button class="nav-btn" data-target="tab-map" title="Location intelligence">
-          <span class="nav-icon">3</span>
-          <span>Locations</span>
+        <button class="nav-btn" data-target="tab-map" title="Geospatial Map">
+          <span class="nav-icon">M</span>
+          <span>Map</span>
         </button>
         <div class="nav-divider"></div>
-        <button class="nav-btn" data-target="tab-timeline" title="Timeline review">
-          <span class="nav-icon">4</span>
-          <span>Timeline</span>
+        <button class="nav-btn" data-target="tab-timeline" title="Timeline Desk">
+          <span class="nav-icon">T</span>
+          <span>Time</span>
         </button>
-        <button class="nav-btn" data-target="tab-cases" title="Case management">
-          <span class="nav-icon">5</span>
-          <span>Case management</span>
+        <button class="nav-btn" data-target="tab-cases" title="Case Desk">
+          <span class="nav-icon">C</span>
+          <span>Cases</span>
         </button>
-        <button class="nav-btn" data-target="tab-audit" title="Ingestion audit">
-          <span class="nav-icon">6</span>
-          <span>Ingestion audit</span>
+        <button class="nav-btn" data-target="tab-audit" title="Ingest Audit">
+          <span class="nav-icon">I</span>
+          <span>Ingest</span>
         </button>
-        <div id="sidebar-footer">
-          <div class="sidebar-note">Need the original visual style?</div>
-          <a class="workspace-link workspace-link-subtle" href="/ui/legacy.html">Use legacy interface</a>
-        </div>
       </nav>
 
       <div id="content">
@@ -81,11 +66,11 @@
             <div class="workspace-head workspace-head-atlas">
               <div class="workspace-head-copy">
                 <div class="workspace-kicker">Section 01 // Entity Graph</div>
-                <div class="workspace-brandline">Network workspace</div>
-                <h1 class="section-title">Entity network analysis</h1>
+                <div class="workspace-brandline">Operation Lens</div>
+                <h1 class="section-title">Entity Relationship Atlas</h1>
                 <p class="section-desc">
-                  Start from a person, alias, location, vehicle, or organisation and inspect the evidence-backed network around it.
-                  Review connected actors, filter weak links, and keep the supporting record visible while you work.
+                  A cinematic overview of people, places, vehicles, and organisations pulled into the same evidentiary field.
+                  Start from a subject and expand outward to expose the strongest connected actors.
                 </p>
               </div>
               <div class="head-metrics">
@@ -110,11 +95,11 @@
                   <div class="card-pad">
                     <div class="panel-titlebar">
                       <div>
-                        <div id="graph-panel-overline" class="panel-overline">Network seed</div>
-                        <div id="graph-panel-title" class="panel-title">Start from a subject</div>
-                        <p id="graph-panel-copy" class="panel-copy">Use a person, alias, location, or asset to build a reviewable network view.</p>
+                        <div id="graph-panel-overline" class="panel-overline">Entity seed</div>
+                        <div id="graph-panel-title" class="panel-title">Expand a network</div>
+                        <p id="graph-panel-copy" class="panel-copy">Use a person, alias, location, or asset to build an operational map around it.</p>
                       </div>
-                      <div id="graph-panel-chip" class="panel-chip">Evidence-backed</div>
+                      <div id="graph-panel-chip" class="panel-chip">Atlas query</div>
                     </div>
 
                     <form id="graph-form">
@@ -136,7 +121,7 @@
                         <input type="text" id="graph-entity-input" placeholder="e.g. Marcus Webb" />
                       </div>
                       <button id="graph-submit-btn" type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
-                        Load network
+                        Expand network
                       </button>
                     </form>
                   </div>
@@ -146,9 +131,9 @@
                   <div class="card-pad">
                     <div class="panel-titlebar">
                       <div>
-                        <div class="panel-overline">Selected record</div>
+                        <div class="panel-overline">Node dossier</div>
                         <div class="panel-title">Relationship detail</div>
-                        <p class="panel-copy compact-copy">Select a node or link to inspect connected evidence and context.</p>
+                        <p class="panel-copy compact-copy">Click a node or edge to inspect details.</p>
                       </div>
                       <div class="panel-chip">Evidence</div>
                     </div>
@@ -182,7 +167,7 @@
                     <button id="graph-fit-btn" type="button">Fit</button>
                   </div>
                   <div id="cy"></div>
-                  <div id="cy-overlay">Evidence graph</div>
+                  <div id="cy-overlay">Local render</div>
                 </div>
 
                 <div id="graph-legend" class="panel-card">
@@ -198,9 +183,9 @@
                   <div class="card-pad">
                     <div class="panel-titlebar">
                       <div>
-                        <div class="panel-overline">Analyst tools</div>
+                        <div class="panel-overline">Investigator tools</div>
                         <div class="panel-title">Path finder &amp; network insights</div>
-                        <p class="panel-copy">Trace the strongest evidence-backed chain between two entities, or surface the actors shaping the network.</p>
+                        <p class="panel-copy">Trace the strongest evidence-backed chain between two entities, or see who brokers the network.</p>
                       </div>
                       <div class="panel-chip">Phase 08</div>
                     </div>
@@ -276,11 +261,11 @@
           <div class="workspace">
             <div class="workspace-head">
               <div>
-                <div class="workspace-kicker">Section 02 // Questioning</div>
-                <h1 class="section-title">Investigative questioning</h1>
+                <div class="workspace-kicker">Section 02</div>
+                <h1 class="section-title">Evidence Query Briefing</h1>
                 <p class="section-desc">
-                  Ask a question in analyst language and receive a structured answer, claim validation, and the cited evidence
-                  used to support it.
+                  Submit an investigative question and receive a structured briefing, claim-by-claim validation, and the exact
+                  retrieval snippets behind the response.
                 </p>
               </div>
               <div class="head-metrics">
@@ -306,8 +291,8 @@
                     <div class="panel-titlebar">
                       <div>
                         <div class="panel-overline">Query setup</div>
-                        <div class="panel-title">Build a query</div>
-                        <p class="panel-copy">Phrase the prompt as a briefing request, intelligence question, or link-analysis task.</p>
+                        <div class="panel-title">Build a question</div>
+                        <p class="panel-copy">Phrase your prompt the way an analyst would ask for a case briefing or link analysis.</p>
                       </div>
                       <div class="panel-chip">Grounded only</div>
                     </div>
@@ -369,14 +354,9 @@
                         Cloud mode keeps raw document text local and only forwards structured evidence and metadata.
                       </div>
 
-                      <div class="query-actions">
-                        <button type="submit" class="btn btn-primary" data-run-mode="briefing" style="width:100%;margin-top:16px;">
-                          Run briefing
-                        </button>
-                        <button type="submit" id="case-report-btn" class="btn btn-secondary" data-run-mode="case-report" style="width:100%;margin-top:10px;">
-                          Generate case intelligence report
-                        </button>
-                      </div>
+                      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">
+                        Run briefing
+                      </button>
                     </form>
                   </div>
                 </div>
@@ -394,7 +374,7 @@
                   <div class="panel-banner">Assessment narrative</div>
                   <div id="answer-panel">
                     <div class="query-chat-toolbar">
-                      <div class="query-chat-title">Question history</div>
+                      <div class="query-chat-title">RAG chat transcript</div>
                       <button type="button" id="chat-reset-btn" class="btn">Clear chat</button>
                     </div>
                     <div id="query-chat-thread">
@@ -411,7 +391,6 @@
                   <div id="evidence-chunks">
                     <div class="timeline-empty">Evidence excerpts will populate here once a response is grounded.</div>
                   </div>
-                  <div id="report-pack" class="report-pack"></div>
                 </div>
               </div>
             </div>
@@ -422,11 +401,11 @@
           <div class="workspace">
             <div class="workspace-head">
               <div>
-                <div class="workspace-kicker">Section 03 // Locations</div>
-                <h1 class="section-title">Location intelligence</h1>
+                <div class="workspace-kicker">Section 03</div>
+                <h1 class="section-title">Geospatial Map</h1>
                 <p class="section-desc">
-                  Review all geocoded locations across the corpus, filter by case, and open the underlying documents behind
-                  each mapped site.
+                  Every geocoded location across the corpus plotted on the ground. Filter by case, toggle satellite imagery,
+                  and click pins to see the documents that reference each site.
                 </p>
               </div>
               <div class="head-metrics">
@@ -452,8 +431,8 @@
                     <div class="panel-titlebar">
                       <div>
                         <div class="panel-overline">Scope</div>
-                        <div class="panel-title">Filter locations</div>
-                        <p class="panel-copy">Narrow the view to a single operation or review the full corpus on one map.</p>
+                        <div class="panel-title">Filter pins</div>
+                        <p class="panel-copy">Narrow to a single operation, or show the full corpus on one map.</p>
                       </div>
                       <div class="panel-chip">Geocoded</div>
                     </div>
@@ -483,7 +462,7 @@
                   <div class="card-pad">
                     <div class="panel-titlebar">
                       <div>
-                        <div class="panel-overline">Selected location</div>
+                        <div class="panel-overline">Pin dossier</div>
                         <div class="panel-title">Selection</div>
                         <p class="panel-copy">Click a pin to see the documents that reference this location.</p>
                       </div>
@@ -508,11 +487,11 @@
           <div class="workspace">
             <div class="workspace-head">
               <div>
-                <div class="workspace-kicker">Section 04 // Timeline</div>
-                <h1 class="section-title">Chronology review</h1>
+                <div class="workspace-kicker">Section 03</div>
+                <h1 class="section-title">Chronology Desk</h1>
                 <p class="section-desc">
-                  Filter by entity or document and turn the corpus into a dated sequence suitable for briefings, handover
-                  notes, and investigative reconstruction.
+                  Filter by entity or document and turn the corpus into a clean dated sequence for briefings, handoffs, and
+                  investigative reconstruction.
                 </p>
               </div>
               <div class="head-metrics">
@@ -539,7 +518,7 @@
                       <div>
                         <div class="panel-overline">Timeline filter</div>
                         <div class="panel-title">Scope the record</div>
-                        <p class="panel-copy">Target a specific actor or constrain the chronology to selected documents and exhibits.</p>
+                        <p class="panel-copy">Target a specific actor or constrain the chronology to selected documents.</p>
                       </div>
                       <div class="panel-chip">Date extracted</div>
                     </div>
@@ -575,11 +554,11 @@
           <div class="workspace">
             <div class="workspace-head">
               <div>
-                <div class="workspace-kicker">Section 05 // Cases</div>
-                <h1 class="section-title">Case management</h1>
+                <div class="workspace-kicker">Section 04</div>
+                <h1 class="section-title">Case Intake Desk</h1>
                 <p class="section-desc">
-                  Create and manage case records, upload evidence from the browser, and maintain a visible register of what is
-                  attached to each investigation.
+                  Create a case record, upload PDF evidence directly from the browser, and keep a visible register of what has
+                  been attached to each case.
                 </p>
               </div>
               <div class="head-metrics">
@@ -606,7 +585,7 @@
                       <div>
                         <div class="panel-overline">Case registry</div>
                         <div class="panel-title">Create a case</div>
-                        <p class="panel-copy">Register the case reference once, then reuse it for uploads, filtering, and scoped questioning.</p>
+                        <p class="panel-copy">Add the case reference once, then reuse it for uploads and scoped querying.</p>
                       </div>
                       <div class="panel-chip">Structured</div>
                     </div>
@@ -633,7 +612,7 @@
                     <div class="panel-titlebar">
                       <div>
                         <div class="panel-overline">Evidence intake</div>
-                        <div class="panel-title">Upload evidence</div>
+                        <div class="panel-title">Upload case documents</div>
                         <p class="panel-copy">Choose a case, then upload documents, images, tables, email exports, or media files for local ingestion.</p>
                       </div>
                       <div class="panel-chip">Evidence</div>
@@ -683,11 +662,11 @@
           <div class="workspace">
             <div class="workspace-head">
               <div>
-                <div class="workspace-kicker">Section 06 // Audit</div>
-                <h1 class="section-title">Ingestion audit</h1>
+                <div class="workspace-kicker">Section 05</div>
+                <h1 class="section-title">Ingest Audit</h1>
                 <p class="section-desc">
-                  Review each ingestion event, the metadata captured for it, and the entities proposed by extraction.
-                  Low-confidence candidates are flagged so investigators can confirm, remove, or leave them pending.
+                  Every document ingested, the metadata captured for it, and the entities the extractor proposed.
+                  Low-confidence candidates are flagged so you can confirm and add them to the graph â€” or leave them aside.
                 </p>
               </div>
               <div class="head-metrics">
@@ -714,7 +693,7 @@
                       <div>
                         <div class="panel-overline">Filters</div>
                         <div class="panel-title">Scope ingestion log</div>
-                        <p class="panel-copy">Filter by case or status and review the newest events first.</p>
+                        <p class="panel-copy">Filter by case or status. Newest events appear first.</p>
                       </div>
                       <div class="panel-chip">Audit</div>
                     </div>
@@ -795,44 +774,14 @@
     (function () {
       const btns = document.querySelectorAll(".nav-btn[data-target]");
       const panes = document.querySelectorAll(".tab-pane");
-      const storageKey = "lens-active-tab";
-
-      function activateTab(targetId, updateHash = true) {
-        if (!targetId) return;
-        const target = document.getElementById(targetId);
-        if (!target) return;
-        btns.forEach((btn) => {
-          const active = btn.dataset.target === targetId;
-          btn.classList.toggle("active", active);
-          btn.setAttribute("aria-current", active ? "page" : "false");
-        });
-        panes.forEach((pane) => pane.classList.toggle("active", pane.id === targetId));
-        try {
-          window.localStorage.setItem(storageKey, targetId);
-        } catch (_) {
-          // Storage can fail in restrictive browser modes; the UI still works.
-        }
-        if (updateHash) {
-          history.replaceState(null, "", `#${targetId.replace(/^tab-/, "")}`);
-        }
-      }
-
       btns.forEach((btn) => {
-        btn.addEventListener("click", () => activateTab(btn.dataset.target));
-      });
-
-      const requested = window.location.hash ? `tab-${window.location.hash.slice(1)}` : "";
-      let stored = "";
-      try {
-        stored = window.localStorage.getItem(storageKey) || "";
-      } catch (_) {
-        stored = "";
-      }
-      activateTab(requested || stored || "tab-graph", false);
-
-      window.addEventListener("hashchange", () => {
-        const next = window.location.hash ? `tab-${window.location.hash.slice(1)}` : "";
-        if (next) activateTab(next, false);
+        btn.addEventListener("click", () => {
+          btns.forEach((b) => b.classList.remove("active"));
+          panes.forEach((p) => p.classList.remove("active"));
+          btn.classList.add("active");
+          const target = document.getElementById(btn.dataset.target);
+          if (target) target.classList.add("active");
+        });
       });
     })();
   </script>
@@ -851,8 +800,7 @@
 
   <script src="/ui/confidence_badge.js?v=20260420-casescope"></script>
   <script src="/ui/state_store.js?v=20260420-state"></script>
-  <script src="/ui/evidence_panel.js?v=20260424-case-report"></script>
-  <script src="/ui/case_report.js?v=20260424-case-report"></script>
+  <script src="/ui/evidence_panel.js?v=20260420-casescope"></script>
   <script src="/ui/case_manager.js?v=20260420-casescope"></script>
   <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
   <script src="https://unpkg.com/layout-base@2.0.1/layout-base.js"></script>

@@ -4,8 +4,9 @@ import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from operation_lens_v2.api.schemas import QueryRequest
+from operation_lens_v2.api.schemas import CaseReportRequest, QueryRequest
 from operation_lens_v2.query.pipeline import (
+    run_case_intelligence_report,
     run_investigator_query,
     run_investigator_query_stream,
     run_query,
@@ -66,6 +67,18 @@ async def query_endpoint(payload: QueryRequest) -> dict[str, object]:
         chat_history=payload.chat_history,
         recall_mode=payload.recall_mode,
     )
+
+
+@router.post("/case-report")
+async def case_report_endpoint(payload: CaseReportRequest) -> dict[str, object]:
+    """Generate a detailed case-wide intelligence briefing pack."""
+    try:
+        return await run_case_intelligence_report(
+            payload.case_ref,
+            prompt=payload.prompt,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/stream")

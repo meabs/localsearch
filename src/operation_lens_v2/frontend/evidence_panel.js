@@ -5,13 +5,15 @@ const docIdInput = document.getElementById("doc-id-input");
 const answer = document.getElementById("answer");
 const claims = document.getElementById("claims");
 const evidenceChunks = document.getElementById("evidence-chunks");
+const reportPack = document.getElementById("report-pack");
 const cloudToggle = document.getElementById("cloud-toggle");
 const templateSelect = document.getElementById("query-template-select");
 const recallModeSelect = document.getElementById("recall-mode-select");
 const scopeInputs = Array.from(document.querySelectorAll('input[name="query-scope"]'));
 const chatThread = document.getElementById("query-chat-thread");
 const chatResetButton = document.getElementById("chat-reset-btn");
-const submitButton = form ? form.querySelector("button[type='submit']") : null;
+const runButtons = form ? Array.from(form.querySelectorAll("button[data-run-mode]")) : [];
+const submitButton = runButtons[0] || null;
 const agentTracePanel = document.getElementById("agent-trace-panel");
 const agentTrace = document.getElementById("agent-trace");
 const agentTraceStatus = document.getElementById("agent-trace-status");
@@ -338,6 +340,164 @@ function renderEvidencePanel(data) {
     .join("");
 }
 
+function clearReportPack() {
+  if (!reportPack) return;
+  reportPack.classList.remove("is-visible");
+  reportPack.innerHTML = "";
+}
+
+function downloadTextFile(filename, content) {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function renderReportPack(data) {
+  if (!reportPack) return;
+  const pack = data?.report_pack;
+  if (!pack) {
+    clearReportPack();
+    return;
+  }
+  const metrics = pack.metrics || {};
+  const timeline = Array.isArray(pack.timeline) ? pack.timeline : [];
+  const centrality = Array.isArray(pack.centrality) ? pack.centrality : [];
+  const communities = Array.isArray(pack.communities) ? pack.communities : [];
+  const documents = Array.isArray(pack.documents) ? pack.documents : [];
+
+  reportPack.classList.add("is-visible");
+  reportPack.innerHTML = `
+    <div class="report-pack-header">
+      <div>
+        <div class="report-pack-title">Case intelligence report</div>
+        <div class="report-pack-copy">
+          Full-case summary for ${escapeHtml(pack.case_ref || data.case_scope || "current case")}
+          ${pack.case_name ? `&middot; ${escapeHtml(pack.case_name)}` : ""}
+          ${pack.generated_at ? `&middot; generated ${escapeHtml(pack.generated_at)}` : ""}
+        </div>
+      </div>
+      <div class="report-pack-actions">
+        <button type="button" class="btn btn-secondary" id="report-download-btn">Download markdown</button>
+      </div>
+    </div>
+    <div class="report-pack-grid">
+      <div class="report-pack-card">
+        <div class="report-pack-label">Documents</div>
+        <div class="report-pack-value">${escapeHtml(String(metrics.documents || 0))}</div>
+      </div>
+      <div class="report-pack-card">
+        <div class="report-pack-label">Entities</div>
+        <div class="report-pack-value">${escapeHtml(String(metrics.entities || 0))}</div>
+      </div>
+      <div class="report-pack-card">
+        <div class="report-pack-label">Relationships</div>
+        <div class="report-pack-value">${escapeHtml(String(metrics.relationships || 0))}</div>
+      </div>
+      <div class="report-pack-card">
+        <div class="report-pack-label">Locations</div>
+        <div class="report-pack-value">${escapeHtml(String(metrics.locations || 0))}</div>
+      </div>
+    </div>
+    <section class="report-pack-section">
+      <h4>Network highlights</h4>
+      <div class="report-pack-meta">
+        ${escapeHtml(String(pack.graph_metrics?.node_count || 0))} nodes &middot;
+        ${escapeHtml(String(pack.graph_metrics?.edge_count || 0))} edges &middot;
+        modularity ${escapeHtml(String(pack.modularity ?? 0))}
+      </div>
+      <ul>
+        ${
+          centrality.length
+            ? centrality
+                .slice(0, 8)
+                .map(
+                  (entity) =>
+                    `<li>${escapeHtml(entity.canonical_name || entity.entity_id)} (${escapeHtml(
+                      entity.entity_type || "?",
+                    )}) &middot; score ${escapeHtml(String(entity.score ?? 0))}</li>`,
+                )
+                .join("")
+            : "<li>No central actors available for this case yet.</li>"
+        }
+      </ul>
+    </section>
+    <section class="report-pack-section">
+      <h4>Communities</h4>
+      <ul>
+        ${
+          communities.length
+            ? communities
+                .slice(0, 6)
+                .map((community) => {
+                  const members = (community.members || [])
+                    .slice(0, 5)
+                    .map((member) => member.canonical_name || member.entity_id)
+                    .filter(Boolean)
+                    .join(", ");
+                  return `<li>Cluster ${escapeHtml(String((community.community_id || 0) + 1))}: ${escapeHtml(
+                    String(community.size || 0),
+                  )} members${members ? ` &middot; ${escapeHtml(members)}` : ""}</li>`;
+                })
+                .join("")
+            : "<li>No community clusters available for this case.</li>"
+        }
+      </ul>
+    </section>
+    <section class="report-pack-section">
+      <h4>Chronology</h4>
+      <ul>
+        ${
+          timeline.length
+            ? timeline
+                .slice(0, 12)
+                .map(
+                  (event) =>
+                    `<li><strong>${escapeHtml(event.event_time || "Undated")}</strong>: ${escapeHtml(
+                      event.text || "",
+                    )}${event.doc_name || event.doc_id ? ` <span class="report-pack-meta">[${escapeHtml(
+                      event.doc_name || event.doc_id,
+                    )} p.${escapeHtml(String(event.page ?? "?"))}]</span>` : ""}</li>`,
+                )
+                .join("")
+            : "<li>No dated events were extracted into this report.</li>"
+        }
+      </ul>
+    </section>
+    <section class="report-pack-section">
+      <h4>Document register</h4>
+      <ul>
+        ${
+          documents.length
+            ? documents
+                .slice(0, 16)
+                .map(
+                  (document) =>
+                    `<li>${escapeHtml(document.filename || document.doc_id)} &middot; ${escapeHtml(
+                      String(document.page_count || 0),
+                    )} pages &middot; ${escapeHtml(String(document.entity_count || 0))} entities</li>`,
+                )
+                .join("")
+            : "<li>No indexed documents found for this case.</li>"
+        }
+      </ul>
+    </section>
+  `;
+
+  const downloadBtn = document.getElementById("report-download-btn");
+  if (downloadBtn) {
+    downloadBtn.addEventListener("click", () => {
+      const safeCase = String(pack.case_ref || "case-report").replace(/[^a-z0-9_-]+/gi, "-");
+      downloadTextFile(`${safeCase}-intelligence-report.md`, pack.markdown || data.answer || "");
+    });
+  }
+}
+
 function clearClaimEvidenceHighlights() {
   claims.querySelectorAll(".claim").forEach((el) => el.classList.remove("claim-active"));
   evidenceChunks.querySelectorAll(".evidence-card").forEach((el) => {
@@ -639,6 +799,22 @@ if (form) {
     }
   });
 }
+
+window.LensQueryUI = {
+  activateClaimEvidence,
+  appendTraceStep,
+  clearClaimEvidenceHighlights,
+  clearReportPack,
+  escapeHtml,
+  focusEvidenceCard,
+  formatAnswerText,
+  pushChatTurn,
+  renderClaim,
+  renderEvidencePanel,
+  renderReportPack,
+  resetAgentTrace,
+  setAgentTraceStatus,
+};
 
 renderChatThread();
 loadQueryTemplates().catch(() => {});

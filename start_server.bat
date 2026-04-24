@@ -19,4 +19,4 @@ if not defined PYTHON_EXE (
   )
 )
 
-"%PYTHON_EXE%" -m uvicorn operation_lens_v2.api.main:app --host 0.0.0.0 --port 8000
+"%PYTHON_EXE%" -m uvicorn --app-dir "%REPO_DIR%\src" operation_lens_v2.api.main:app --host 0.0.0.0 --port 8000
