@@ -398,6 +398,27 @@
     `;
   }
 
+  function frameNodeFor(node, nodes) {
+    if (!node) return null;
+    if (node.entity_type === "MEDIA_FRAME") return node;
+    if (node.entity_type === "MEDIA_OBJECT" && node.frame_id) {
+      return nodes.find((item) => item.id === `frame:${node.frame_id}`) || null;
+    }
+    return null;
+  }
+
+  function frameDescriptionForNode(node, nodes) {
+    const frameNode = frameNodeFor(node, nodes);
+    if (frameNode?.description) return frameNode.description;
+    if (node?.entity_type === "MEDIA_FRAME" && node.description) return node.description;
+    return "";
+  }
+
+  function mediaFrameSummaryHtml(text, { compact = false } = {}) {
+    if (!text) return "";
+    return `<div class="media-frame-summary ${compact ? "compact" : ""}">${escHtml(text)}</div>`;
+  }
+
   function positionMediaBoxes(root) {
     (root || document).querySelectorAll(".media-frame-image-wrap").forEach((wrap) => {
       const img = wrap.querySelector(".media-frame-img");
@@ -609,6 +630,7 @@
   function renderMediaFrameCard(frame, detectionsByFrame) {
     const frameId = frameIdForNode(frame);
     const detections = detectionsByFrame.get(frameId) || [];
+    const frameSummary = mediaFrameSummaryHtml(frame.description || "");
     const boxes = detections
       .filter((item) => Array.isArray(item.bbox))
       .map(
@@ -650,6 +672,7 @@
           <span>${escHtml(frame.label)}</span>
           <strong>${detections.length} detection${detections.length === 1 ? "" : "s"}</strong>
         </div>
+        ${frameSummary}
         <div class="media-detection-list">${chips}</div>
         ${descriptions ? `<div class="media-detection-notes">${descriptions}</div>` : ""}
       </article>
@@ -846,9 +869,11 @@
     const linked = edges.filter((e) => e.source === node.id || e.target === node.id);
     const bbox = Array.isArray(node.bbox) ? node.bbox.map((v) => Number(v).toFixed(1)).join(", ") : "";
     const descriptionItems = mediaDescriptionsForNode(node, edges, nodes);
+    const frameDescription = frameDescriptionForNode(node, nodes);
     detail.innerHTML = `
       <div class="node-detail-header">${escHtml(node.label)}</div>
       ${mediaPreviewHtml(node, { compact: true })}
+      ${mediaFrameSummaryHtml(frameDescription, { compact: true })}
       ${mediaDescriptionListHtml(descriptionItems)}
       <div class="detail-field"><span class="detail-key">TYPE</span><span class="detail-val">${escHtml(node.entity_type || "UNKNOWN")}</span></div>
       ${node.media_type ? `<div class="detail-field"><span class="detail-key">MEDIA</span><span class="detail-val">${escHtml(node.media_type)}</span></div>` : ""}

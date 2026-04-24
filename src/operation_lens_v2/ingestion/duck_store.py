@@ -305,6 +305,7 @@ def ensure_media_object_tables(con: duckdb.DuckDBPyConnection) -> None:
           timestamp_seconds DOUBLE DEFAULT 0,
           frame_index INTEGER DEFAULT 0,
           image_path TEXT NOT NULL,
+          description TEXT,
           created_at TIMESTAMP DEFAULT now()
         );
 
@@ -354,6 +355,11 @@ def ensure_media_object_tables(con: duckdb.DuckDBPyConnection) -> None:
         ),
     ):
         _try_ddl(con, ddl, context="media_object_index")
+    _try_ddl(
+        con,
+        "ALTER TABLE media_frames ADD COLUMN description TEXT;",
+        context="media_frames.description",
+    )
     _try_ddl(
         con,
         "ALTER TABLE media_detections ADD COLUMN description TEXT;",
@@ -746,16 +752,17 @@ def insert_media_frame(
     timestamp_seconds: float,
     frame_index: int,
     image_path: str,
+    description: str | None = None,
 ) -> str:
     frame_id = str(uuid4())
     con.execute(
         """
         INSERT INTO media_frames (
-          frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path
+          frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path, description
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        [frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path],
+        [frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path, description],
     )
     return frame_id
 
@@ -766,7 +773,7 @@ def get_media_frame(
 ) -> dict[str, object] | None:
     row = con.execute(
         """
-        SELECT frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path
+        SELECT frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path, description
         FROM media_frames
         WHERE frame_id = ?
         """,
@@ -781,6 +788,7 @@ def get_media_frame(
         "timestamp_seconds": float(row[3] or 0),
         "frame_index": int(row[4] or 0),
         "image_path": row[5],
+        "description": row[6] or "",
     }
 
 
@@ -908,7 +916,7 @@ def list_media_object_graph(
     placeholders = ",".join(["?"] * len(asset_ids))
     frames = con.execute(
         f"""
-        SELECT frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path
+        SELECT frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path, description
         FROM media_frames
         WHERE asset_id IN ({placeholders})
         ORDER BY asset_id, frame_index
@@ -952,7 +960,7 @@ def list_media_object_graph(
                 "mention_count": 5,
             }
         )
-    for frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path in frames:
+    for frame_id, asset_id, doc_id, timestamp_seconds, frame_index, image_path, description in frames:
         label = f"frame {int(frame_index) + 1}"
         if timestamp_seconds is not None:
             label = f"{label} @ {float(timestamp_seconds):.1f}s"
@@ -966,6 +974,7 @@ def list_media_object_graph(
                 "timestamp_seconds": float(timestamp_seconds or 0),
                 "frame_index": int(frame_index or 0),
                 "image_path": image_path,
+                "description": description or "",
                 "mention_count": 3,
             }
         )

@@ -300,8 +300,14 @@ async def _media_object_vector_rows(
         if not text:
             continue
         page = int(item.get("frame_index") or 0) + 1
+        chunk_key = str(
+            item.get("detection_id")
+            or item.get("frame_id")
+            or uuid4()
+        )
+        chunk_prefix = "media-object" if item.get("detection_id") else "media-frame"
         chunk = Chunk(
-            chunk_id=f"media-object:{item.get('detection_id') or uuid4()}",
+            chunk_id=f"{chunk_prefix}:{chunk_key}",
             doc_id=doc_id,
             page=page,
             chunk_index=10_000 + index,

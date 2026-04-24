@@ -28,6 +28,7 @@ class Settings(BaseSettings):
         default="llama3.1:8b-instruct-q4_K_M", alias="LOCAL_EXTRACTION_MODEL"
     )
     local_embed_model: str = Field(default="nomic-embed-text", alias="LOCAL_EMBED_MODEL")
+    local_vision_model: str = Field(default="", alias="LOCAL_VISION_MODEL")
 
     # Investigator agent models (tool-calling loop + briefing writer + critic)
     investigator_model: str = Field(default="gpt-oss:20b", alias="INVESTIGATOR_MODEL")
@@ -79,6 +80,17 @@ class Settings(BaseSettings):
     ffmpeg_path: str = Field(default="", alias="FFMPEG_PATH")
     media_object_detection_model: str = Field(
         default="data/models/yolov8n.pt", alias="MEDIA_OBJECT_DETECTION_MODEL"
+    )
+    media_object_open_vocab_model: str = Field(
+        default="yolov8s-worldv2.pt", alias="MEDIA_OBJECT_OPEN_VOCAB_MODEL"
+    )
+    media_object_priority_labels: str = Field(
+        default=(
+            "person,vehicle,car,van,truck,motorcycle,bicycle,boat,airplane,"
+            "suitcase,backpack,bag,handbag,knife,gun,firearm,rifle,pistol,"
+            "shotgun,weapon,baton,mask,helmet"
+        ),
+        alias="MEDIA_OBJECT_PRIORITY_LABELS",
     )
     media_object_frame_count: int = Field(default=8, alias="MEDIA_OBJECT_FRAME_COUNT")
     media_object_confidence: float = Field(default=0.25, alias="MEDIA_OBJECT_CONFIDENCE")

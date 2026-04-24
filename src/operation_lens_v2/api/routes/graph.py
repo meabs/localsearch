@@ -12,6 +12,7 @@ from operation_lens_v2.config import settings
 from operation_lens_v2.ingestion import duck_store
 from operation_lens_v2.ingestion.duck_store import get_case_id_by_ref
 from operation_lens_v2.ingestion.entity_schema import get_schema
+from operation_lens_v2.ingestion.media_objects import _extract_frame_at
 from operation_lens_v2.runtime import get_duck_connection
 from operation_lens_v2.services.geocoder import GeocoderDisabled, geocode_entity
 from operation_lens_v2.services.graph_algorithms import (
@@ -38,6 +39,19 @@ def _attachments_root() -> Path:
     root = _PROJECT_ROOT / "data" / "attachments"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _resolve_media_frame_path(raw_path: str) -> Path:
+    stored = Path(raw_path)
+    if stored.is_absolute():
+        return stored
+    project_path = _PROJECT_ROOT / stored
+    if project_path.exists():
+        return project_path
+    cwd_path = Path.cwd() / stored
+    if cwd_path.exists():
+        return cwd_path
+    return project_path
 
 
 def _safe_filename(filename: str) -> str:
@@ -471,9 +485,18 @@ def media_frame_file(frame_id: str) -> FileResponse:
     frame = duck_store.get_media_frame(con, frame_id)
     if not frame:
         raise HTTPException(status_code=404, detail="Media frame not found")
-    path = Path(str(frame["image_path"]))
-    if not path.is_absolute():
-        path = _PROJECT_ROOT / path
+    path = _resolve_media_frame_path(str(frame["image_path"]))
+    if (not path.exists() or not path.is_file()) and frame.get("asset_id"):
+        asset = con.execute(
+            "SELECT filepath, media_type FROM media_assets WHERE asset_id = ?",
+            [frame["asset_id"]],
+        ).fetchone()
+        if asset:
+            source_path = Path(str(asset[0]))
+            if source_path.exists() and str(asset[1] or "") != "image":
+                target_path = _resolve_media_frame_path(str(frame["image_path"]))
+                if _extract_frame_at(source_path, target_path, float(frame.get("timestamp_seconds") or 0)):
+                    path = target_path
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Media frame file missing")
     media_type = mimetypes.guess_type(path.name)[0] or "image/jpeg"

@@ -41,6 +41,7 @@ def test_media_object_graph_returns_assets_frames_and_objects(tmp_path, monkeypa
         timestamp_seconds=1.0,
         frame_index=0,
         image_path="data/media_frames/frame.jpg",
+        description="Frame 1 shows a person standing beside a bag in an indoor room.",
     )
     person_id = duck_store.insert_media_detection(
         con,
@@ -90,14 +91,17 @@ def test_media_object_graph_returns_assets_frames_and_objects(tmp_path, monkeypa
         "MEDIA_OBJECT",
     }
     object_nodes = [node for node in result["nodes"] if node["entity_type"] == "MEDIA_OBJECT"]
+    frame_nodes = [node for node in result["nodes"] if node["entity_type"] == "MEDIA_FRAME"]
     assert {node["description"] for node in object_nodes} == {
         "Person detected near the centre of the frame.",
         "Bag detected on the right of the frame.",
     }
+    assert frame_nodes[0]["description"] == "Frame 1 shows a person standing beside a bag in an indoor room."
     assert any(edge["type"] == "NEAR" for edge in result["edges"])
     stored_frame = duck_store.get_media_frame(con, frame_id)
     assert stored_frame is not None
     assert stored_frame["image_path"] == "data/media_frames/frame.jpg"
+    assert stored_frame["description"] == "Frame 1 shows a person standing beside a bag in an indoor room."
 
 
 def test_find_ffmpeg_prefers_configured_executable(tmp_path, monkeypatch) -> None:
@@ -156,6 +160,12 @@ async def test_media_object_vector_rows_index_detection_text(monkeypatch) -> Non
         media_graph={
             "evidence_texts": [
                 {
+                    "frame_id": "frame-1",
+                    "frame_index": 1,
+                    "description": "Frame 2 shows a person carrying a suitcase through a hallway.",
+                    "text": "Frame summary for clip.mp4 at 2.0s: Frame 2 shows a person carrying a suitcase through a hallway.",
+                },
+                {
                     "detection_id": "det-1",
                     "frame_index": 2,
                     "description": "Person detected in clip.mp4 at 3.0s near the centre.",
@@ -168,6 +178,9 @@ async def test_media_object_vector_rows_index_detection_text(monkeypatch) -> Non
         },
     )
 
-    assert chunks[0].chunk_id == "media-object:det-1"
-    assert chunks[0].page == 3
-    assert rows[0]["text"].startswith("Person detected")
+    assert chunks[0].chunk_id == "media-frame:frame-1"
+    assert chunks[0].page == 2
+    assert rows[0]["text"].startswith("Frame summary")
+    assert chunks[1].chunk_id == "media-object:det-1"
+    assert chunks[1].page == 3
+    assert rows[1]["text"].startswith("Person detected")

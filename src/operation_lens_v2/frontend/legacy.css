@@ -1314,6 +1314,20 @@ input[type="file"]::-webkit-file-upload-button {
   color: var(--ink-soft);
 }
 
+.media-frame-summary {
+  padding: 9px 10px;
+  border: 1px solid rgba(95, 121, 141, 0.28);
+  border-radius: 12px;
+  background: rgba(220, 232, 242, 0.08);
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
+.media-frame-summary.compact {
+  margin-top: 12px;
+}
+
 .media-object-graph-panel {
   margin-top: 16px;
   padding: 14px;
