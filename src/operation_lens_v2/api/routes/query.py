@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from operation_lens_v2.api.schemas import CaseReportRequest, QueryRequest
+from operation_lens_v2.query import planner
 from operation_lens_v2.query.pipeline import (
     run_case_intelligence_report,
     run_investigator_query,
@@ -140,3 +141,16 @@ async def query_stream_endpoint(payload: QueryRequest) -> StreamingResponse:
 def query_templates() -> dict[str, list[dict[str, str]]]:
     """Return saved query templates for common investigator workflows."""
     return {"templates": QUERY_TEMPLATES}
+
+
+@router.get("/suggested-pivots")
+async def suggested_pivots(query: str, planner_mode: bool = True) -> dict[str, object]:
+    """Return planner-guided next pivots without running full retrieval."""
+    trace = await planner.plan_query(query, planner_mode=planner_mode)
+    return {
+        "query": query,
+        "planner_trace": trace,
+        "suggested_pivots": list(trace.get("suggested_pivots") or []),
+        "follow_up_questions": list(trace.get("follow_up_questions") or []),
+        "rewrite_query": trace.get("rewrite_query") or query,
+    }

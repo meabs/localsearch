@@ -2,35 +2,32 @@ from __future__ import annotations
 
 import pytest
 
-from operation_lens_v2.api.routes.query import case_report_endpoint
-from operation_lens_v2.api.schemas import CaseReportRequest
+from operation_lens_v2.api.routes.query import suggested_pivots
 
 
 @pytest.mark.asyncio
-async def test_case_report_endpoint_dispatches_pipeline(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    async def fake_run_case_intelligence_report(case_ref: str, *, prompt: str | None = None):
-        captured["case_ref"] = case_ref
-        captured["prompt"] = prompt
+async def test_suggested_pivots_endpoint_returns_planner_payload(monkeypatch) -> None:
+    async def fake_plan_query(query: str, *, planner_mode: bool = True):
         return {
-            "intent": "case_intelligence_report",
-            "case_scope": case_ref,
-            "answer": "Generated",
-            "claims": [],
-            "report_pack": {"case_ref": case_ref},
+            "intent": "entity_relationship_query",
+            "subjects": ["Marcus Webb"],
+            "filters": {"document_refs": [], "date_hints": [], "entity_types": [], "relation_types": []},
+            "search_strategy": "graph_forward",
+            "graph_expansion_targets": ["Marcus Webb"],
+            "follow_up_questions": ["What locations recur around Marcus Webb?"],
+            "suggested_pivots": ["Build a chronology for Marcus Webb with exact citations."],
+            "rewrite_query": "Marcus Webb with graph links and exact citations",
+            "planner_backend": "deterministic",
+            "planner_status": "fallback",
+            "raw_query": query,
+            "parsed": {"intent": "entity_relationship_query"},
         }
 
-    monkeypatch.setattr(
-        "operation_lens_v2.api.routes.query.run_case_intelligence_report",
-        fake_run_case_intelligence_report,
-    )
+    monkeypatch.setattr("operation_lens_v2.api.routes.query.planner.plan_query", fake_plan_query)
 
-    result = await case_report_endpoint(
-        CaseReportRequest(case_ref="OP_REPORT", prompt="Focus on timeline and network"),
-    )
+    result = await suggested_pivots("What connects Marcus Webb to the depot?")
 
-    assert captured["case_ref"] == "OP_REPORT"
-    assert captured["prompt"] == "Focus on timeline and network"
-    assert result["intent"] == "case_intelligence_report"
-    assert result["report_pack"]["case_ref"] == "OP_REPORT"
+    assert result["query"] == "What connects Marcus Webb to the depot?"
+    assert result["suggested_pivots"] == ["Build a chronology for Marcus Webb with exact citations."]
+    assert result["follow_up_questions"] == ["What locations recur around Marcus Webb?"]
+    assert result["rewrite_query"] == "Marcus Webb with graph links and exact citations"
