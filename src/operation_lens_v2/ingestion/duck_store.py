@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from pathlib import Path
@@ -137,6 +138,15 @@ CREATE TABLE IF NOT EXISTS answer_spans (
   supporting_evidence TEXT[],
   confidence FLOAT,
   validated BOOLEAN
+);
+
+CREATE TABLE IF NOT EXISTS eval_runs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  started_at TIMESTAMP,
+  completed_at TIMESTAMP,
+  metrics_json TEXT DEFAULT '{}',
+  fixture_path TEXT
 );
 """
 
@@ -616,6 +626,32 @@ def db_health(con: duckdb.DuckDBPyConnection) -> dict[str, str]:
         "SELECT count(*) FROM information_schema.tables WHERE table_schema='main';"
     ).fetchone()[0]
     return {"status": "ok", "tables": str(table_count)}
+
+
+def record_eval_run(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    eval_run_id: str,
+    name: str,
+    started_at: str,
+    completed_at: str,
+    metrics: dict[str, object],
+    fixture_path: str,
+) -> None:
+    con.execute(
+        """
+        INSERT INTO eval_runs (id, name, started_at, completed_at, metrics_json, fixture_path)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            eval_run_id,
+            name,
+            started_at,
+            completed_at,
+            json.dumps(metrics, sort_keys=True),
+            fixture_path,
+        ],
+    )
 
 
 def upsert_document(
