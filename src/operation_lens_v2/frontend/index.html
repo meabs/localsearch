@@ -48,28 +48,28 @@
       <nav id="sidebar" aria-label="Workspace navigation">
         <button class="nav-btn active" data-target="tab-graph" title="Network analysis">
           <span class="nav-icon">1</span>
-          <span>Network analysis</span>
+          <span class="nav-label">Network analysis</span>
         </button>
         <button class="nav-btn" data-target="tab-query" title="Questioning and briefing">
           <span class="nav-icon">2</span>
-          <span>Questioning</span>
+          <span class="nav-label">Questioning</span>
         </button>
         <button class="nav-btn" data-target="tab-map" title="Location intelligence">
           <span class="nav-icon">3</span>
-          <span>Locations</span>
+          <span class="nav-label">Locations</span>
         </button>
         <div class="nav-divider"></div>
         <button class="nav-btn" data-target="tab-timeline" title="Timeline review">
           <span class="nav-icon">4</span>
-          <span>Timeline</span>
+          <span class="nav-label">Timeline</span>
         </button>
         <button class="nav-btn" data-target="tab-cases" title="Case management">
           <span class="nav-icon">5</span>
-          <span>Case management</span>
+          <span class="nav-label">Case management</span>
         </button>
         <button class="nav-btn" data-target="tab-audit" title="Ingestion audit">
           <span class="nav-icon">6</span>
-          <span>Ingestion audit</span>
+          <span class="nav-label">Ingestion audit</span>
         </button>
         <div id="sidebar-footer">
           <div class="sidebar-note">Need the original visual style?</div>
@@ -333,11 +333,29 @@
                     </div>
 
                     <div class="report-launch-callout">
-                      <div>
-                        <div class="panel-overline">How to run it</div>
-                        <p class="panel-copy compact-copy">
-                          Keep the scope on <strong>Case</strong>, enter the case reference, then use the dedicated report action below.
-                        </p>
+                      <div class="report-launch-form">
+                        <div>
+                          <div class="panel-overline">How to run it</div>
+                          <p class="panel-copy compact-copy">
+                            Pick a registered case, optionally describe the angle you want covered, then generate the case pack directly from here.
+                          </p>
+                        </div>
+
+                        <div class="field-group">
+                          <label class="field-label" for="report-case-select">Case for report</label>
+                          <select id="report-case-select">
+                            <option value="">Choose a registered case</option>
+                          </select>
+                        </div>
+
+                        <div class="field-group">
+                          <label class="field-label" for="report-prompt-input">Report focus (optional)</label>
+                          <textarea
+                            id="report-prompt-input"
+                            rows="3"
+                            placeholder="e.g. Focus on phones, vehicles, timeline gaps, and who is central to the network."
+                          ></textarea>
+                        </div>
                       </div>
                       <button type="button" id="report-shortcut-btn" class="btn btn-primary">Generate case report</button>
                     </div>
@@ -379,7 +397,9 @@
 
                       <div class="field-group">
                         <label class="field-label" for="case-input">Case scope</label>
-                        <input type="text" id="case-input" placeholder="e.g. OP_NIGHTFALL (optional)" />
+                        <select id="case-input">
+                          <option value="">All registered cases</option>
+                        </select>
                       </div>
 
                       <div class="field-group">
@@ -875,9 +895,7 @@
   <script>
     (function () {
       const reportWorkspaceLink = document.getElementById("report-workspace-link");
-      const reportShortcutButton = document.getElementById("report-shortcut-btn");
-      const caseReportButton = document.getElementById("case-report-btn");
-      const caseScopeInput = document.getElementById("case-input");
+      const reportCaseSelect = document.getElementById("report-case-select");
       const scopeCase = document.querySelector('input[name="query-scope"][value="case"]');
       const queryNav = document.querySelector('.nav-btn[data-target="tab-query"]');
 
@@ -887,21 +905,14 @@
           window.location.hash = "query";
         }
         if (scopeCase) scopeCase.checked = true;
-        if (caseScopeInput) {
-          caseScopeInput.focus();
-          caseScopeInput.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (reportCaseSelect) {
+          reportCaseSelect.focus();
+          reportCaseSelect.scrollIntoView({ behavior: "smooth", block: "center" });
         }
       }
 
       if (reportWorkspaceLink) {
         reportWorkspaceLink.addEventListener("click", focusReportWorkflow);
-      }
-
-      if (reportShortcutButton && caseReportButton) {
-        reportShortcutButton.addEventListener("click", () => {
-          focusReportWorkflow();
-          window.requestAnimationFrame(() => caseReportButton.click());
-        });
       }
     })();
   </script>

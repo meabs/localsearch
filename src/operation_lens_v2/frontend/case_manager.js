@@ -10,6 +10,7 @@ const caseUploadDropzone = document.getElementById("case-upload-dropzone");
 const caseList = document.getElementById("case-list");
 const caseDocuments = document.getElementById("case-documents");
 const queryCaseInput = document.getElementById("case-input");
+const reportCaseSelect = document.getElementById("report-case-select");
 
 let knownCases = [];
 let selectedCaseRef = "";
@@ -67,8 +68,11 @@ function setSelectedCase(caseRef, options = {}) {
   if (caseUploadSelect) {
     caseUploadSelect.value = selectedCaseRef;
   }
-  if (!options.skipQueryInput && queryCaseInput && selectedCaseRef) {
+  if (!options.skipQueryInput && queryCaseInput) {
     queryCaseInput.value = selectedCaseRef;
+  }
+  if (reportCaseSelect) {
+    reportCaseSelect.value = selectedCaseRef;
   }
   renderCaseList();
   if (!options.skipDocuments && selectedCaseRef) {
@@ -121,26 +125,56 @@ function renderCaseList() {
 }
 
 function renderCaseOptions() {
-  if (!caseUploadSelect) return;
-  if (!knownCases.length) {
-    caseUploadSelect.innerHTML = '<option value="">No cases available</option>';
-    caseUploadSelect.disabled = true;
-    return;
-  }
-
-  caseUploadSelect.disabled = false;
-  caseUploadSelect.innerHTML = knownCases
+  const optionMarkup = knownCases
     .map(
       (item) =>
         `<option value="${escapeCaseHtml(item.case_ref)}">${escapeCaseHtml(item.case_ref)} - ${escapeCaseHtml(item.case_name)}</option>`,
     )
     .join("");
 
+  if (caseUploadSelect) {
+    if (!knownCases.length) {
+      caseUploadSelect.innerHTML = '<option value="">No cases available</option>';
+      caseUploadSelect.disabled = true;
+    } else {
+      caseUploadSelect.disabled = false;
+      caseUploadSelect.innerHTML = optionMarkup;
+    }
+  }
+
+  if (queryCaseInput) {
+    if (!knownCases.length) {
+      queryCaseInput.innerHTML = '<option value="">All registered cases</option>';
+      queryCaseInput.disabled = true;
+    } else {
+      queryCaseInput.disabled = false;
+      queryCaseInput.innerHTML = `<option value="">All registered cases</option>${optionMarkup}`;
+    }
+  }
+
+  if (reportCaseSelect) {
+    if (!knownCases.length) {
+      reportCaseSelect.innerHTML = '<option value="">Choose a registered case</option>';
+      reportCaseSelect.disabled = true;
+    } else {
+      reportCaseSelect.disabled = false;
+      reportCaseSelect.innerHTML = `<option value="">Choose a registered case</option>${optionMarkup}`;
+    }
+  }
+
+  if (!knownCases.length) {
+    return;
+  }
+
   if (selectedCaseRef) {
-    caseUploadSelect.value = selectedCaseRef;
+    if (caseUploadSelect) caseUploadSelect.value = selectedCaseRef;
+    if (queryCaseInput) queryCaseInput.value = selectedCaseRef;
+    if (reportCaseSelect) reportCaseSelect.value = selectedCaseRef;
   } else {
     selectedCaseRef = knownCases[0].case_ref;
-    caseUploadSelect.value = selectedCaseRef;
+    if (caseUploadSelect) caseUploadSelect.value = selectedCaseRef;
+    if (queryCaseInput) queryCaseInput.value = selectedCaseRef;
+    if (reportCaseSelect) reportCaseSelect.value = selectedCaseRef;
   }
 }
 
@@ -209,6 +243,32 @@ async function loadDocuments(caseRef) {
 if (caseUploadSelect) {
   caseUploadSelect.addEventListener("change", () => {
     setSelectedCase(caseUploadSelect.value);
+  });
+}
+
+if (queryCaseInput) {
+  queryCaseInput.addEventListener("change", () => {
+    if (queryCaseInput.value) {
+      setSelectedCase(queryCaseInput.value, { skipDocuments: true });
+      return;
+    }
+    const previous = selectedCaseRef;
+    selectedCaseRef = "";
+    if (reportCaseSelect) reportCaseSelect.value = "";
+    window.__lensSelectedCaseRef = selectedCaseRef;
+    window.dispatchEvent(
+      new CustomEvent("lens:case-selected", {
+        detail: { caseRef: "", previousCaseRef: previous },
+      }),
+    );
+  });
+}
+
+if (reportCaseSelect) {
+  reportCaseSelect.addEventListener("change", () => {
+    if (reportCaseSelect.value) {
+      setSelectedCase(reportCaseSelect.value, { skipDocuments: true, skipQueryInput: false });
+    }
   });
 }
 
