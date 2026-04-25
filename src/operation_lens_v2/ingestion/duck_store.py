@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ import duckdb
 from operation_lens_v2.models import Chunk, RelationshipCandidate
 
 logger = logging.getLogger(__name__)
+_SCHEMA_INIT_LOCK = threading.Lock()
 
 
 def _try_ddl(con: duckdb.DuckDBPyConnection, ddl: str, *, context: str) -> None:
@@ -158,23 +160,27 @@ def connect(path: str) -> duckdb.DuckDBPyConnection:
 
 def init_db(path: str) -> duckdb.DuckDBPyConnection:
     con = connect(path)
-    con.execute(SCHEMA_SQL)
-    _ensure_case_columns(con)
-    _ensure_geocode_columns(con)
-    _ensure_attachments_table(con)
-    _ensure_temporal_columns(con)
-    _ensure_ingestion_events_table(con)
-    ensure_media_object_tables(con)
-    _ensure_entity_review_columns(con)
-    _ensure_alias_resolution_columns(con)
-    _ensure_graph_indexes(con)
-    _ensure_document_columns(con)
-    _ensure_document_page_quality_table(con)
-    _try_ddl(
-        con,
-        "PRAGMA create_fts_index('chunks', 'chunk_id', 'text');",
-        context="fts_index",
-    )
+    # DuckDB schema DDL is idempotent but not safely concurrent. Serializing the
+    # bootstrap avoids write-write conflicts when multiple requests/workers try
+    # to run the same `CREATE`/`ALTER` statements against one database file.
+    with _SCHEMA_INIT_LOCK:
+        con.execute(SCHEMA_SQL)
+        _ensure_case_columns(con)
+        _ensure_geocode_columns(con)
+        _ensure_attachments_table(con)
+        _ensure_temporal_columns(con)
+        _ensure_ingestion_events_table(con)
+        ensure_media_object_tables(con)
+        _ensure_entity_review_columns(con)
+        _ensure_alias_resolution_columns(con)
+        _ensure_graph_indexes(con)
+        _ensure_document_columns(con)
+        _ensure_document_page_quality_table(con)
+        _try_ddl(
+            con,
+            "PRAGMA create_fts_index('chunks', 'chunk_id', 'text');",
+            context="fts_index",
+        )
     logger.info("DuckDB initialized at %s", path)
     return con
 

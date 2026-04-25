@@ -473,7 +473,6 @@ def network(
 def media_network(case_ref: str | None = None, limit: int = 500) -> dict[str, object]:
     """Return the separate media-object graph: assets, frames, detections and spatial links."""
     con = get_duck_connection(settings.duckdb_path)
-    duck_store.ensure_media_object_tables(con)
     return duck_store.list_media_object_graph(con, case_ref=case_ref, limit=limit)
 
 
@@ -481,7 +480,6 @@ def media_network(case_ref: str | None = None, limit: int = 500) -> dict[str, ob
 def media_frame_file(frame_id: str) -> FileResponse:
     """Serve an extracted media frame so the UI can show the visual evidence."""
     con = get_duck_connection(settings.duckdb_path)
-    duck_store.ensure_media_object_tables(con)
     frame = duck_store.get_media_frame(con, frame_id)
     if not frame:
         raise HTTPException(status_code=404, detail="Media frame not found")
