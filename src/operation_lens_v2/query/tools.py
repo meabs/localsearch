@@ -86,6 +86,74 @@ def _ensure_doc_in_scope(
             )
 
 
+def _resolve_entity_ids(
+    scope: ScopeContext,
+    con: duckdb.DuckDBPyConnection,
+    identifiers: Iterable[str] | None,
+) -> list[str]:
+    """Resolve raw names or aliases to in-scope entity IDs."""
+    if not identifiers:
+        return []
+
+    scope_sql, scope_params = _scope_doc_id_filter(scope, "ea.source_doc")
+    resolved: list[str] = []
+    seen: set[str] = set()
+
+    for raw_identifier in identifiers:
+        identifier = str(raw_identifier or "").strip()
+        if not identifier:
+            continue
+
+        rows = con.execute(
+            f"""
+            SELECT
+              e.entity_id,
+              COALESCE(e.mention_count, 0) AS mention_count,
+              COUNT(DISTINCT ea.source_doc) AS doc_count
+            FROM entities e
+            JOIN entity_aliases ea ON ea.entity_id = e.entity_id
+            WHERE {scope_sql}
+              AND (
+                e.entity_id = ?
+                OR lower(e.canonical_name) = lower(?)
+                OR lower(ea.alias_text) = lower(?)
+              )
+            GROUP BY e.entity_id, e.mention_count
+            ORDER BY mention_count DESC, doc_count DESC, e.entity_id
+            """,
+            [*scope_params, identifier, identifier, identifier],
+        ).fetchall()
+
+        if not rows:
+            like = f"%{identifier.lower()}%"
+            rows = con.execute(
+                f"""
+                SELECT
+                  e.entity_id,
+                  COALESCE(e.mention_count, 0) AS mention_count,
+                  COUNT(DISTINCT ea.source_doc) AS doc_count
+                FROM entities e
+                JOIN entity_aliases ea ON ea.entity_id = e.entity_id
+                WHERE {scope_sql}
+                  AND (
+                    lower(e.canonical_name) LIKE ?
+                    OR lower(ea.alias_text) LIKE ?
+                  )
+                GROUP BY e.entity_id, e.mention_count
+                ORDER BY mention_count DESC, doc_count DESC, e.entity_id
+                """,
+                [*scope_params, like, like],
+            ).fetchall()
+
+        for row in rows:
+            entity_id = str(row[0])
+            if entity_id not in seen:
+                seen.add(entity_id)
+                resolved.append(entity_id)
+
+    return resolved
+
+
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
 
@@ -153,6 +221,11 @@ async def get_entity_profile(
     citation_limit: int = 5,
 ) -> EntityProfile | None:
     """Return a profile for one entity, restricted to the current scope."""
+    resolved_ids = _resolve_entity_ids(scope, con, [entity_id])
+    if not resolved_ids:
+        return None
+    entity_id = resolved_ids[0]
+
     scope_sql, scope_params = _scope_doc_id_filter(scope, "ea.source_doc")
 
     base = con.execute(
@@ -243,6 +316,11 @@ async def get_relationships(
     limit: int = DEFAULT_TOOL_LIMIT,
 ) -> list[RelationshipEdge]:
     """Return graph edges touching entity_id, scoped to evidence from in-scope docs."""
+    resolved_ids = _resolve_entity_ids(scope, con, [entity_id])
+    if not resolved_ids:
+        return []
+    entity_id = resolved_ids[0]
+
     scope_sql, scope_params = _scope_doc_id_filter(scope, "re.doc_id")
     depth = max(1, min(depth, 2))
     limit = min(limit, DEFAULT_TOOL_LIMIT)
@@ -367,6 +445,13 @@ async def get_cooccurrence(
     limit: int = DEFAULT_TOOL_LIMIT,
 ) -> list[CooccurrenceHit]:
     """Find chunks where both entities appear (via entity_aliases.source_chunk)."""
+    resolved_a = _resolve_entity_ids(scope, con, [entity_a_id])
+    resolved_b = _resolve_entity_ids(scope, con, [entity_b_id])
+    if not resolved_a or not resolved_b:
+        return []
+    entity_a_id = resolved_a[0]
+    entity_b_id = resolved_b[0]
+
     scope_sql, scope_params = _scope_doc_id_filter(scope, "c.doc_id")
     limit = min(limit, DEFAULT_TOOL_LIMIT)
 
@@ -420,11 +505,14 @@ async def get_timeline(
     entity_filter = ""
     entity_params: list[Any] = []
     if entity_ids:
-        placeholders = ",".join(["?"] * len(entity_ids))
+        resolved_entity_ids = _resolve_entity_ids(scope, con, entity_ids)
+        if not resolved_entity_ids:
+            return []
+        placeholders = ",".join(["?"] * len(resolved_entity_ids))
         entity_filter = (
             f" AND (r.source_entity IN ({placeholders}) OR r.target_entity IN ({placeholders}))"
         )
-        entity_params = [*entity_ids, *entity_ids]
+        entity_params = [*resolved_entity_ids, *resolved_entity_ids]
 
     rows = con.execute(
         f"""
@@ -582,6 +670,13 @@ async def walk_graph(
     max_paths: int = 5,
 ) -> list[GraphPath]:
     """BFS for evidence-backed paths between two entities. Returns at most max_paths."""
+    resolved_source = _resolve_entity_ids(scope, con, [source_entity_id])
+    resolved_target = _resolve_entity_ids(scope, con, [target_entity_id])
+    if not resolved_source or not resolved_target:
+        return []
+    source_entity_id = resolved_source[0]
+    target_entity_id = resolved_target[0]
+
     max_hops = max(1, min(max_hops, 4))
 
     # Walk the neighbour graph breadth-first, but on each emitted hop pull the

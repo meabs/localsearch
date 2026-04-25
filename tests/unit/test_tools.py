@@ -188,6 +188,14 @@ async def test_entity_profile_returns_none_when_entity_outside_scope(seeded_db):
     assert profile is None
 
 
+@pytest.mark.asyncio
+async def test_entity_profile_accepts_canonical_name(seeded_db):
+    scope = build_scope("corpus")
+    profile = await tools.get_entity_profile(scope, "Marcus Webb", seeded_db["con"])
+    assert profile is not None
+    assert profile.entity_id == seeded_db["webb"]
+
+
 # ── get_relationships ──────────────────────────────────────────────────────────
 
 
@@ -240,6 +248,14 @@ async def test_cooccurrence_respects_document_scope(seeded_db):
     assert hits == []
 
 
+@pytest.mark.asyncio
+async def test_cooccurrence_accepts_canonical_names(seeded_db):
+    scope = build_scope("corpus")
+    hits = await tools.get_cooccurrence(scope, "RX71 KLD", "Rania Khalil", seeded_db["con"])
+    assert len(hits) == 1
+    assert hits[0].chunk_id == seeded_db["chunk_a2c1"]
+
+
 # ── get_timeline ───────────────────────────────────────────────────────────────
 
 
@@ -258,6 +274,14 @@ async def test_timeline_filters_by_entity(seeded_db):
         scope, seeded_db["con"], entity_ids=[seeded_db["marsh"]]
     )
     assert events == []
+
+
+@pytest.mark.asyncio
+async def test_timeline_accepts_canonical_name(seeded_db):
+    scope = build_scope("corpus")
+    events = await tools.get_timeline(scope, seeded_db["con"], entity_ids=["Marcus Webb"])
+    assert len(events) == 1
+    assert "2024-04-01" in events[0].event_time
 
 
 # ── fetch_chunk ────────────────────────────────────────────────────────────────
@@ -337,3 +361,11 @@ async def test_walk_graph_finds_direct_path(seeded_db):
     assert len(paths) == 1
     assert paths[0].hops == 1
     assert paths[0].citations
+
+
+@pytest.mark.asyncio
+async def test_walk_graph_accepts_canonical_names(seeded_db):
+    scope = build_scope("corpus")
+    paths = await tools.walk_graph(scope, "Marcus Webb", "Rania Khalil", seeded_db["con"])
+    assert len(paths) == 1
+    assert paths[0].hops == 1

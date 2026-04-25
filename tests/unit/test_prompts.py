@@ -45,10 +45,31 @@ def test_investigator_prompt_has_role_and_tool_guidance():
     assert "fetch_chunk" in INVESTIGATOR_SYSTEM_PROMPT
     assert re.search(r"10\s+tool\s+calls", INVESTIGATOR_SYSTEM_PROMPT)
     assert "InvestigationReport" in INVESTIGATOR_SYSTEM_PROMPT
+    assert "final_result" in INVESTIGATOR_SYSTEM_PROMPT
+
+
+def test_investigator_prompt_spells_out_required_output_fields():
+    for field_name in (
+        "hypothesis",
+        "key_facts",
+        "paths",
+        "timeline",
+        "gaps",
+        "next_actions",
+        "confidence",
+        "evidence_citations",
+    ):
+        assert field_name in INVESTIGATOR_SYSTEM_PROMPT
+    assert "never omit a" in INVESTIGATOR_SYSTEM_PROMPT.lower()
 
 
 def test_investigator_prompt_requires_disconfirmation_step():
     assert "disprove" in INVESTIGATOR_SYSTEM_PROMPT or "disconfirm" in INVESTIGATOR_SYSTEM_PROMPT
+
+
+def test_investigator_prompt_warns_against_raw_name_ids_and_empty_resolution():
+    assert "operate on entity IDs" in INVESTIGATOR_SYSTEM_PROMPT
+    assert "If `search_entities` returns no matches" in INVESTIGATOR_SYSTEM_PROMPT
 
 
 def test_writer_prompt_lists_all_required_sections():
