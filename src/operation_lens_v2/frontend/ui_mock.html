@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OPERATION LENS v2 — Mock Redesign</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-0: #040609;
+      --bg-1: #091019;
+      --bg-2: #101925;
+      --bg-3: #152131;
+      --bg-4: #1e2d42;
+      --bg-panel: rgba(10,16,24,0.88);
+      --border-0: rgba(110,146,178,0.14);
+      --border-1: rgba(133,170,206,0.22);
+      --ink-strong: #eff4fb;
+      --ink-soft: #cad8e6;
+      --ink-muted: #8fa4b8;
+      --ink-faint: #677c92;
+      --amber: #f1a73f;
+      --amber-dim: #e7ab53;
+      --amber-glow: rgba(241,167,63,0.14);
+      --teal: #63a99a;
+      --green: #39c67e;
+      --red: #db5e5e;
+      --blue: #5e91d8;
+      --font-display: "Bebas Neue", sans-serif;
+      --font-mono: "IBM Plex Mono", monospace;
+      --font-body: "IBM Plex Sans", sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      background:
+        radial-gradient(circle at top left, rgba(94,145,216,0.16), transparent 28%),
+        radial-gradient(circle at top right, rgba(241,167,63,0.12), transparent 24%),
+        linear-gradient(180deg, #071019 0%, #040609 100%);
+      color: var(--ink-soft);
+      font-family: var(--font-body);
+      font-size: 14px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+    body::before {
+      content: "";
+      position: fixed; inset: 0; pointer-events: none;
+      background:
+        linear-gradient(rgba(255,255,255,0.016) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.016) 1px, transparent 1px);
+      background-size: 72px 72px;
+    }
+
+    /* ── SHELL ── */
+    #shell { display: flex; flex-direction: column; height: 100vh; position: relative; z-index: 1; }
+
+    /* ── TOPBAR (slimmer) ── */
+    #topbar {
+      display: flex; align-items: center; gap: 16px;
+      height: 52px;
+      padding: 0 20px;
+      background: rgba(4,6,9,0.92);
+      border-bottom: 1px solid var(--border-0);
+      flex-shrink: 0;
+    }
+    #topbar-logo { display: flex; align-items: baseline; gap: 10px; }
+    .brand-label {
+      font-family: var(--font-display);
+      font-size: 22px;
+      letter-spacing: 0.06em;
+      color: var(--ink-strong);
+    }
+    .brand-badge {
+      font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+      color: var(--amber); background: var(--amber-glow);
+      border: 1px solid rgba(241,167,63,0.28);
+      padding: 2px 7px; border-radius: 4px;
+    }
+    .brand-ver {
+      font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em;
+      color: var(--ink-faint);
+    }
+
+    /* Case selector pill — new addition */
+    #case-selector {
+      display: flex; align-items: center; gap: 8px;
+      margin-left: 24px;
+      background: rgba(30,45,66,0.6);
+      border: 1px solid var(--border-1);
+      border-radius: 8px;
+      padding: 5px 12px;
+      cursor: pointer;
+    }
+    .case-label { font-size: 10px; letter-spacing: 0.1em; color: var(--ink-faint); text-transform: uppercase; }
+    .case-name { font-family: var(--font-mono); font-size: 13px; color: var(--ink-strong); }
+    .case-chevron { color: var(--ink-faint); font-size: 10px; }
+
+    /* Global search bar — new addition */
+    #global-search {
+      flex: 1;
+      max-width: 440px;
+      margin-left: 16px;
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(6,10,16,0.85);
+      border: 1px solid var(--border-1);
+      border-radius: 8px;
+      padding: 0 12px;
+      height: 34px;
+      transition: border-color 0.2s;
+    }
+    #global-search:focus-within { border-color: rgba(241,167,63,0.5); }
+    .search-icon { color: var(--ink-faint); font-size: 13px; }
+    .search-input {
+      flex: 1; background: transparent; border: none; outline: none;
+      color: var(--ink-soft); font-family: var(--font-mono); font-size: 12px;
+      letter-spacing: 0.04em;
+    }
+    .search-input::placeholder { color: var(--ink-faint); }
+    .search-kbd {
+      font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint);
+      background: rgba(255,255,255,0.06); border: 1px solid var(--border-0);
+      border-radius: 3px; padding: 1px 5px;
+    }
+
+    /* Status chips */
+    #topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+    .status-chip {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em;
+      color: var(--ink-muted);
+      background: rgba(16,25,37,0.6);
+      border: 1px solid var(--border-0);
+      border-radius: 6px; padding: 4px 10px;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .dot-green { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+    .dot-amber { background: var(--amber); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+    .topbar-time {
+      font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em;
+      color: var(--ink-faint);
+    }
+
+    /* ── BODY ── */
+    #main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── SIDEBAR (wider, always-visible labels) ── */
+    #sidebar {
+      width: 180px; flex-shrink: 0;
+      background: rgba(4,8,14,0.85);
+      border-right: 1px solid var(--border-0);
+      display: flex; flex-direction: column;
+      padding: 12px 8px;
+      gap: 2px;
+    }
+    .sidebar-section-label {
+      font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em;
+      color: var(--ink-faint); text-transform: uppercase;
+      padding: 8px 10px 4px;
+    }
+    .nav-btn {
+      display: flex; align-items: center; gap: 10px;
+      background: transparent; border: 1px solid transparent;
+      border-radius: 8px; cursor: pointer;
+      color: var(--ink-muted); font-family: var(--font-body); font-size: 13px;
+      padding: 9px 12px;
+      transition: all 0.15s;
+      text-align: left; width: 100%;
+    }
+    .nav-btn:hover { background: rgba(255,255,255,0.05); color: var(--ink-soft); }
+    .nav-btn.active {
+      background: rgba(241,167,63,0.1);
+      border-color: rgba(241,167,63,0.25);
+      color: var(--amber);
+    }
+    .nav-icon {
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.06);
+      border-radius: 6px;
+      font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+      flex-shrink: 0;
+    }
+    .nav-btn.active .nav-icon { background: var(--amber-glow); color: var(--amber); }
+    .nav-label { flex: 1; }
+    .nav-badge {
+      font-family: var(--font-mono); font-size: 10px;
+      background: rgba(94,145,216,0.18); color: var(--blue);
+      border-radius: 4px; padding: 1px 5px;
+    }
+    .nav-divider { height: 1px; background: var(--border-0); margin: 6px 8px; }
+    .sidebar-bottom { margin-top: auto; }
+
+    /* ── CONTENT ── */
+    #content { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+
+    /* ── COMPACT SECTION HEADER (new) ── */
+    .section-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border-0);
+      flex-shrink: 0;
+    }
+    .section-header-left { display: flex; align-items: center; gap: 14px; }
+    .section-kicker {
+      font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+      color: var(--ink-faint); text-transform: uppercase;
+    }
+    .section-title {
+      font-family: var(--font-display); font-size: 26px; letter-spacing: 0.06em;
+      color: var(--ink-strong); line-height: 1;
+    }
+    .section-sep { width: 1px; height: 28px; background: var(--border-1); }
+    .section-desc { font-size: 12px; color: var(--ink-muted); max-width: 380px; }
+    .section-header-right { display: flex; align-items: center; gap: 8px; }
+    .metric-pill {
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(16,25,37,0.7);
+      border: 1px solid var(--border-1);
+      border-radius: 7px; padding: 5px 12px;
+    }
+    .metric-pill-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; color: var(--ink-faint); text-transform: uppercase; }
+    .metric-pill-val { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--ink-strong); }
+
+    /* ── WORKSPACE BODY ── */
+    .workspace-body {
+      display: flex; flex: 1; gap: 0; overflow: hidden; min-height: 0;
+    }
+
+    /* ── LEFT PANEL (improved) ── */
+    .side-panel {
+      width: 280px; flex-shrink: 0;
+      padding: 16px;
+      border-right: 1px solid var(--border-0);
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+
+    /* Entity search — now a proper input in the panel */
+    .entity-search-wrap {
+      background: rgba(6,10,16,0.85);
+      border: 1px solid var(--border-1);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .entity-search-label {
+      font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em;
+      color: var(--ink-faint); text-transform: uppercase;
+      padding: 8px 12px 4px;
+    }
+    .entity-search-input-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px;
+      border-top: 1px solid var(--border-0);
+    }
+    .entity-search-input {
+      flex: 1; background: transparent; border: none; outline: none;
+      color: var(--ink-soft); font-family: var(--font-mono); font-size: 12px;
+    }
+    .entity-search-input::placeholder { color: var(--ink-faint); }
+    .btn-primary {
+      background: rgba(241,167,63,0.18);
+      border: 1px solid rgba(241,167,63,0.35);
+      border-radius: 7px; color: var(--amber);
+      font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+      letter-spacing: 0.06em; padding: 6px 14px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: rgba(241,167,63,0.28); }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border-1);
+      border-radius: 7px; color: var(--ink-muted);
+      font-family: var(--font-mono); font-size: 11px;
+      padding: 6px 12px; cursor: pointer;
+    }
+
+    /* Panel card */
+    .panel-card {
+      background: rgba(10,16,24,0.7);
+      border: 1px solid var(--border-0);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .panel-card-head {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-0);
+      font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
+      color: var(--ink-faint); text-transform: uppercase;
+    }
+    .panel-card-body { padding: 10px 14px; }
+
+    /* Filter row */
+    .filter-row { display: flex; flex-direction: column; gap: 6px; }
+    .filter-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--ink-faint); text-transform: uppercase; }
+    .filter-select {
+      background: rgba(6,10,16,0.8);
+      border: 1px solid var(--border-1);
+      border-radius: 7px; color: var(--ink-soft);
+      font-family: var(--font-mono); font-size: 12px;
+      padding: 7px 10px; width: 100%; outline: none;
+    }
+
+    /* Entity type tag strip */
+    .type-strip { display: flex; flex-wrap: wrap; gap: 5px; }
+    .type-tag {
+      font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em;
+      border-radius: 5px; padding: 3px 8px; cursor: pointer;
+      transition: all 0.12s;
+    }
+    .type-tag.person { background: rgba(94,145,216,0.14); color: var(--blue); border: 1px solid rgba(94,145,216,0.25); }
+    .type-tag.location { background: rgba(99,169,154,0.14); color: var(--teal); border: 1px solid rgba(99,169,154,0.25); }
+    .type-tag.vehicle { background: rgba(241,167,63,0.12); color: var(--amber); border: 1px solid rgba(241,167,63,0.22); }
+    .type-tag.org { background: rgba(219,94,94,0.12); color: var(--red); border: 1px solid rgba(219,94,94,0.22); }
+    .type-tag.active { opacity: 1; }
+    .type-tag:not(.active) { opacity: 0.5; }
+
+    /* Controls row */
+    .controls-row {
+      display: flex; align-items: center; gap: 8px;
+      flex-wrap: wrap;
+    }
+    .ctrl-label { font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); }
+    .ctrl-val {
+      font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft);
+      background: rgba(255,255,255,0.05); border: 1px solid var(--border-0);
+      border-radius: 5px; padding: 2px 7px;
+    }
+    .ctrl-range {
+      flex: 1; min-width: 80px;
+      accent-color: var(--amber);
+    }
+    .ctrl-check { accent-color: var(--amber); }
+
+    /* ── GRAPH AREA ── */
+    .graph-area {
+      flex: 1;
+      display: flex; flex-direction: column;
+      background:
+        radial-gradient(circle at 40% 50%, rgba(94,145,216,0.08) 0%, transparent 55%),
+        rgba(4,6,9,0.6);
+      position: relative;
+      overflow: hidden;
+    }
+    .graph-toolbar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border-0);
+      background: rgba(4,8,14,0.5);
+      flex-shrink: 0;
+    }
+    .toolbar-btn {
+      background: rgba(16,25,37,0.7); border: 1px solid var(--border-1);
+      border-radius: 6px; color: var(--ink-muted);
+      font-family: var(--font-mono); font-size: 11px; padding: 5px 12px;
+      cursor: pointer;
+    }
+    .toolbar-btn.active { border-color: rgba(241,167,63,0.3); color: var(--amber); background: var(--amber-glow); }
+    .toolbar-sep { width: 1px; height: 20px; background: var(--border-0); }
+
+    /* Minimap overlay */
+    .graph-minimap {
+      position: absolute; bottom: 16px; right: 16px;
+      width: 140px; height: 100px;
+      background: rgba(4,8,14,0.75);
+      border: 1px solid var(--border-1);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .minimap-label { font-family: var(--font-mono); font-size: 9px; color: var(--ink-faint); letter-spacing: 0.1em; }
+
+    /* Graph canvas placeholder */
+    .graph-canvas {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+    }
+    /* Simulated node network */
+    .node {
+      position: absolute;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .node-label {
+      position: absolute;
+      font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em;
+      white-space: nowrap;
+      top: calc(100% + 4px);
+      transform: translateX(-50%); left: 50%;
+    }
+    /* SVG edges */
+    .graph-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+    /* Empty-state hint */
+    .graph-hint {
+      text-align: center;
+      opacity: 0.3;
+    }
+    .graph-hint-title { font-family: var(--font-display); font-size: 28px; letter-spacing: 0.08em; color: var(--ink-muted); }
+    .graph-hint-sub { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); margin-top: 6px; }
+
+    /* ── RIGHT PANEL: Evidence drawer (new addition) ── */
+    .evidence-drawer {
+      width: 260px; flex-shrink: 0;
+      border-left: 1px solid var(--border-0);
+      background: rgba(4,8,14,0.8);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .drawer-head {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-0);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .drawer-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; color: var(--ink-faint); text-transform: uppercase; }
+    .drawer-close { background: none; border: none; cursor: pointer; color: var(--ink-faint); font-size: 14px; }
+    .evidence-list { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .evidence-item {
+      background: rgba(16,25,37,0.6);
+      border: 1px solid var(--border-0);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .ev-type { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+    .ev-text { font-size: 11px; color: var(--ink-muted); line-height: 1.5; }
+    .ev-source { font-family: var(--font-mono); font-size: 9px; color: var(--ink-faint); margin-top: 5px; }
+    .ev-conf {
+      display: inline-block; font-family: var(--font-mono); font-size: 9px;
+      border-radius: 3px; padding: 1px 5px; margin-top: 4px;
+    }
+    .ev-conf.high { background: rgba(57,198,126,0.14); color: var(--green); }
+    .ev-conf.med { background: rgba(241,167,63,0.14); color: var(--amber); }
+
+    /* ── NEW: bottom quick-query bar ── */
+    #quickbar {
+      height: 52px; flex-shrink: 0;
+      background: rgba(4,6,9,0.92);
+      border-top: 1px solid var(--border-0);
+      display: flex; align-items: center; gap: 10px;
+      padding: 0 20px;
+    }
+    .qb-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--ink-faint); text-transform: uppercase; white-space: nowrap; }
+    .qb-input {
+      flex: 1; background: rgba(10,16,24,0.8); border: 1px solid var(--border-1);
+      border-radius: 8px; color: var(--ink-soft); font-family: var(--font-mono); font-size: 12px;
+      padding: 8px 14px; outline: none;
+    }
+    .qb-input::placeholder { color: var(--ink-faint); }
+    .qb-scope {
+      font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted);
+      background: rgba(16,25,37,0.6); border: 1px solid var(--border-1);
+      border-radius: 7px; padding: 6px 12px; cursor: pointer;
+    }
+    .qb-send {
+      background: rgba(241,167,63,0.18); border: 1px solid rgba(241,167,63,0.35);
+      border-radius: 8px; color: var(--amber); font-family: var(--font-mono);
+      font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+      padding: 8px 18px; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<div id="shell">
+
+  <!-- ── TOPBAR ── -->
+  <header id="topbar">
+    <div id="topbar-logo">
+      <span class="brand-label">Operation Lens</span>
+      <span class="brand-badge">RESTRICTED</span>
+      <span class="brand-ver">v2.0</span>
+    </div>
+
+    <!-- Case context selector — NEW -->
+    <div id="case-selector">
+      <span class="case-label">Active case</span>
+      <span class="case-name">OP_TEST</span>
+      <span class="case-chevron">▾</span>
+    </div>
+
+    <!-- Global search — NEW -->
+    <div id="global-search">
+      <span class="search-icon">🔍</span>
+      <input class="search-input" placeholder="Search entities, documents, queries…" />
+      <span class="search-kbd">⌘K</span>
+    </div>
+
+    <div id="topbar-right">
+      <div class="status-chip"><div class="dot dot-green"></div>Inference live</div>
+      <div class="status-chip"><div class="dot dot-amber"></div>Corpus mounted</div>
+      <span class="topbar-time">2026-04-22 20:40Z</span>
+    </div>
+  </header>
+
+  <div id="main">
+
+    <!-- ── SIDEBAR (always-visible labels) ── -->
+    <nav id="sidebar" aria-label="Workspace navigation">
+      <div class="sidebar-section-label">Workspace</div>
+      <button class="nav-btn active">
+        <span class="nav-icon">G</span>
+        <span class="nav-label">Entity Atlas</span>
+      </button>
+      <button class="nav-btn">
+        <span class="nav-icon">Q</span>
+        <span class="nav-label">Query Brief</span>
+        <span class="nav-badge">3</span>
+      </button>
+      <button class="nav-btn">
+        <span class="nav-icon">M</span>
+        <span class="nav-label">Geo Map</span>
+      </button>
+      <div class="nav-divider"></div>
+      <div class="sidebar-section-label">Data</div>
+      <button class="nav-btn">
+        <span class="nav-icon">T</span>
+        <span class="nav-label">Timeline</span>
+      </button>
+      <button class="nav-btn">
+        <span class="nav-icon">C</span>
+        <span class="nav-label">Cases</span>
+      </button>
+      <button class="nav-btn">
+        <span class="nav-icon">I</span>
+        <span class="nav-label">Ingest</span>
+      </button>
+      <div class="nav-divider sidebar-bottom"></div>
+      <button class="nav-btn">
+        <span class="nav-icon">⚙</span>
+        <span class="nav-label">Settings</span>
+      </button>
+    </nav>
+
+    <!-- ── CONTENT ── -->
+    <div id="content">
+
+      <!-- Compact section header — REDESIGNED -->
+      <div class="section-header">
+        <div class="section-header-left">
+          <div>
+            <div class="section-kicker">Section 01 // Entity Graph</div>
+            <div class="section-title">Entity Relationship Atlas</div>
+          </div>
+          <div class="section-sep"></div>
+          <div class="section-desc">
+            Map people, places, vehicles and orgs across the evidence corpus.
+            Expand from any seed entity to reveal connected actors.
+          </div>
+        </div>
+        <div class="section-header-right">
+          <div class="metric-pill"><span class="metric-pill-label">View</span><span class="metric-pill-val">Graph</span></div>
+          <div class="metric-pill"><span class="metric-pill-label">Hops</span><span class="metric-pill-val">2</span></div>
+          <div class="metric-pill"><span class="metric-pill-label">Render</span><span class="metric-pill-val">Local</span></div>
+        </div>
+      </div>
+
+      <!-- Main workspace body -->
+      <div class="workspace-body">
+
+        <!-- LEFT PANEL -->
+        <div class="side-panel">
+
+          <!-- Entity search -->
+          <div class="entity-search-wrap">
+            <div class="entity-search-label">Entity seed</div>
+            <div style="padding:8px 12px;">
+              <div style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--ink-strong);">Expand a network</div>
+              <div style="font-size:11px;color:var(--ink-muted);margin-top:3px;">Person, alias, location, or asset</div>
+            </div>
+            <div class="entity-search-input-row">
+              <input class="entity-search-input" placeholder="e.g. Marcus Webb…" />
+              <button class="btn-primary">Query</button>
+            </div>
+          </div>
+
+          <!-- Entity type filter — NEW -->
+          <div class="panel-card">
+            <div class="panel-card-head">Filter by entity type</div>
+            <div class="panel-card-body">
+              <div class="type-strip">
+                <span class="type-tag person active">Person</span>
+                <span class="type-tag location active">Location</span>
+                <span class="type-tag vehicle active">Vehicle</span>
+                <span class="type-tag org active">Org</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Graph controls -->
+          <div class="panel-card">
+            <div class="panel-card-head">Graph controls</div>
+            <div class="panel-card-body" style="display:flex;flex-direction:column;gap:10px;">
+              <div class="filter-row">
+                <div class="filter-label">Graph type</div>
+                <select class="filter-select"><option>Entity relationship graph</option><option>Co-occurrence graph</option></select>
+              </div>
+              <div class="filter-row">
+                <div class="filter-label">Operation scope</div>
+                <select class="filter-select"><option>All operations</option><option>OP_TEST</option></select>
+              </div>
+              <div class="filter-row">
+                <div class="filter-label">Layout</div>
+                <select class="filter-select"><option>fcose</option><option>cose-bilkent</option><option>dagre</option></select>
+              </div>
+              <div class="controls-row">
+                <span class="ctrl-label">Confidence</span>
+                <input type="range" class="ctrl-range" min="0" max="100" value="40" style="flex:1;" />
+                <span class="ctrl-val">0.4</span>
+              </div>
+              <div class="controls-row">
+                <input type="checkbox" class="ctrl-check" checked />
+                <span class="ctrl-label" style="flex:1;">Cross-doc links</span>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button class="btn-primary" style="flex:1;">Re-layout</button>
+                <button class="btn-ghost" style="flex:1;">Fit</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- GRAPH AREA -->
+        <div class="graph-area">
+          <div class="graph-toolbar">
+            <button class="toolbar-btn active">Network</button>
+            <button class="toolbar-btn">Hierarchy</button>
+            <button class="toolbar-btn">Bipartite</button>
+            <div class="toolbar-sep"></div>
+            <button class="toolbar-btn">⊞ Cluster</button>
+            <button class="toolbar-btn">⊕ Expand all</button>
+            <div class="toolbar-sep"></div>
+            <button class="toolbar-btn">↓ Export</button>
+          </div>
+
+          <div class="graph-canvas">
+            <!-- Simulated node graph -->
+            <svg class="graph-svg" viewBox="0 0 700 420" preserveAspectRatio="none">
+              <!-- edges -->
+              <line x1="350" y1="210" x2="220" y2="140" stroke="rgba(94,145,216,0.25)" stroke-width="1.5"/>
+              <line x1="350" y1="210" x2="490" y2="130" stroke="rgba(94,145,216,0.25)" stroke-width="1.5"/>
+              <line x1="350" y1="210" x2="500" y2="280" stroke="rgba(99,169,154,0.2)" stroke-width="1.5"/>
+              <line x1="350" y1="210" x2="190" y2="300" stroke="rgba(241,167,63,0.2)" stroke-width="1.5"/>
+              <line x1="220" y1="140" x2="130" y2="80" stroke="rgba(94,145,216,0.18)" stroke-width="1"/>
+              <line x1="220" y1="140" x2="150" y2="200" stroke="rgba(94,145,216,0.18)" stroke-width="1"/>
+              <line x1="490" y1="130" x2="590" y2="80" stroke="rgba(94,145,216,0.18)" stroke-width="1"/>
+              <line x1="490" y1="130" x2="560" y2="200" stroke="rgba(99,169,154,0.18)" stroke-width="1"/>
+              <line x1="500" y1="280" x2="580" y2="340" stroke="rgba(219,94,94,0.18)" stroke-width="1"/>
+              <line x1="190" y1="300" x2="100" y2="360" stroke="rgba(241,167,63,0.18)" stroke-width="1"/>
+              <line x1="190" y1="300" x2="270" y2="370" stroke="rgba(99,169,154,0.18)" stroke-width="1"/>
+              <!-- central highlighted edge -->
+              <line x1="350" y1="210" x2="220" y2="140" stroke="rgba(241,167,63,0.55)" stroke-width="2" stroke-dasharray="4 2"/>
+            </svg>
+
+            <!-- Centre node (selected) -->
+            <div class="node" style="left:320px;top:180px;width:50px;height:50px;background:rgba(241,167,63,0.22);border:2px solid var(--amber);box-shadow:0 0 20px rgba(241,167,63,0.3);">
+              <span style="font-family:var(--font-mono);font-size:9px;color:var(--amber);">P</span>
+              <div class="node-label" style="color:var(--amber);">M. Webb</div>
+            </div>
+            <!-- neighbour nodes -->
+            <div class="node" style="left:192px;top:115px;width:38px;height:38px;background:rgba(94,145,216,0.18);border:1.5px solid var(--blue);">
+              <span style="font-family:var(--font-mono);font-size:9px;color:var(--blue);">P</span>
+              <div class="node-label" style="color:var(--blue);">R. Chen</div>
+            </div>
+            <div class="node" style="left:462px;top:105px;width:38px;height:38px;background:rgba(94,145,216,0.18);border:1.5px solid var(--blue);">
+              <span style="font-family:var(--font-mono);font-size:9px;color:var(--blue);">P</span>
+              <div class="node-label" style="color:var(--blue);">S. Malik</div>
+            </div>
+            <div class="node" style="left:472px;top:252px;width:36px;height:36px;background:rgba(99,169,154,0.18);border:1.5px solid var(--teal);">
+              <span style="font-family:var(--font-mono);font-size:9px;color:var(--teal);">L</span>
+              <div class="node-label" style="color:var(--teal);">Dubai</div>
+            </div>
+            <div class="node" style="left:162px;top:272px;width:36px;height:36px;background:rgba(241,167,63,0.14);border:1.5px solid rgba(241,167,63,0.5);">
+              <span style="font-family:var(--font-mono);font-size:9px;color:var(--amber-dim);">V</span>
+              <div class="node-label" style="color:var(--amber-dim);">BMW X5</div>
+            </div>
+            <!-- 2nd-hop nodes -->
+            <div class="node" style="left:103px;top:55px;width:28px;height:28px;background:rgba(94,145,216,0.12);border:1px solid rgba(94,145,216,0.3);">
+              <div class="node-label" style="color:var(--ink-muted);">A. Torres</div>
+            </div>
+            <div class="node" style="left:122px;top:175px;width:28px;height:28px;background:rgba(94,145,216,0.12);border:1px solid rgba(94,145,216,0.3);">
+              <div class="node-label" style="color:var(--ink-muted);">Warehouse</div>
+            </div>
+            <div class="node" style="left:562px;top:55px;width:28px;height:28px;background:rgba(94,145,216,0.12);border:1px solid rgba(94,145,216,0.3);">
+              <div class="node-label" style="color:var(--ink-muted);">K. Osei</div>
+            </div>
+            <div class="node" style="left:532px;top:175px;width:28px;height:28px;background:rgba(99,169,154,0.12);border:1px solid rgba(99,169,154,0.3);">
+              <div class="node-label" style="color:var(--teal);">London</div>
+            </div>
+            <div class="node" style="left:552px;top:315px;width:28px;height:28px;background:rgba(219,94,94,0.12);border:1px solid rgba(219,94,94,0.3);">
+              <div class="node-label" style="color:var(--red);">Shell Co</div>
+            </div>
+            <div class="node" style="left:72px;top:335px;width:28px;height:28px;background:rgba(241,167,63,0.10);border:1px solid rgba(241,167,63,0.25);">
+              <div class="node-label" style="color:var(--ink-muted);">Garage</div>
+            </div>
+            <div class="node" style="left:242px;top:345px;width:28px;height:28px;background:rgba(99,169,154,0.10);border:1px solid rgba(99,169,154,0.25);">
+              <div class="node-label" style="color:var(--teal);">Heathrow</div>
+            </div>
+          </div>
+
+          <!-- Minimap -->
+          <div class="graph-minimap">
+            <span class="minimap-label">OVERVIEW</span>
+          </div>
+        </div>
+
+        <!-- RIGHT PANEL: Evidence drawer — NEW -->
+        <div class="evidence-drawer">
+          <div class="drawer-head">
+            <span class="drawer-title">Evidence — M. Webb</span>
+            <button class="drawer-close">✕</button>
+          </div>
+          <div class="evidence-list">
+            <div class="evidence-item">
+              <div class="ev-type" style="color:var(--blue);">Person → Location</div>
+              <div class="ev-text">"Marcus Webb was observed at Dubai International Airport on 14 Feb."</div>
+              <div class="ev-conf high">HIGH 0.91</div>
+              <div class="ev-source">doc_047.pdf · p.3 · chunk 12</div>
+            </div>
+            <div class="evidence-item">
+              <div class="ev-type" style="color:var(--amber);">Person → Vehicle</div>
+              <div class="ev-text">"The BMW X5 registered to Webb's alias was flagged at three border crossings."</div>
+              <div class="ev-conf med">MED 0.72</div>
+              <div class="ev-source">doc_031.pdf · p.7 · chunk 29</div>
+            </div>
+            <div class="evidence-item">
+              <div class="ev-type" style="color:var(--blue);">Person → Person</div>
+              <div class="ev-text">"Webb and Chen shared the same registered address in 2023."</div>
+              <div class="ev-conf high">HIGH 0.88</div>
+              <div class="ev-source">email_thread_22.parquet · msg 4</div>
+            </div>
+            <div class="evidence-item">
+              <div class="ev-type" style="color:var(--red);">Person → Org</div>
+              <div class="ev-text">"Shell company directorships linked to Webb through nominee filings."</div>
+              <div class="ev-conf med">MED 0.65</div>
+              <div class="ev-source">doc_089.pdf · p.2 · chunk 3</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /.workspace-body -->
+
+      <!-- QUICK QUERY BAR — NEW -->
+      <div id="quickbar">
+        <span class="qb-label">Ask</span>
+        <input class="qb-input" placeholder="What locations is Marcus Webb connected to?" />
+        <select class="qb-scope"><option>Document</option><option>Case</option><option>Corpus</option></select>
+        <button class="qb-send">→ Brief</button>
+      </div>
+
+    </div><!-- /#content -->
+  </div><!-- /#main -->
+</div><!-- /#shell -->
+</body>
+</html>
